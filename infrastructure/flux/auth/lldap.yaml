@@ -34,7 +34,7 @@ spec:
         - name: LLDAP_LDAP_BASE_DN
           value: dc=codesugar,dc=mx
         - name: LLDAP_HTTP_URL
-          value: https://ldap.codesugar.mx
+          value: https://lldap.codesugar.mx
         # Created out-of-band (not committed): kubectl -n auth create secret generic lldap-secrets \
         #   --from-literal=LLDAP_JWT_SECRET=... --from-literal=LLDAP_LDAP_USER_PASS=...
         envFrom:
@@ -46,8 +46,8 @@ spec:
       volumes:
       - name: data
         hostPath:
-          path: /var/lib/lldap/data
-          type: DirectoryOrCreate
+          path: /zpool-ssd/k8s/lldap/data
+          type: Directory
 ---
 apiVersion: v1
 kind: Service
@@ -75,7 +75,7 @@ spec:
   - name: main-gateway
     namespace: gateway-system
   hostnames:
-  - ldap.codesugar.mx
+  - lldap.codesugar.mx
   rules:
   - matches:
     - path:
