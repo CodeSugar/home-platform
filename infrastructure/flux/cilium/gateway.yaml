@@ -46,3 +46,15 @@ spec:
     allowedRoutes:
       namespaces:
         from: All
+  - name: ldap-https
+    protocol: HTTPS
+    port: 443
+    hostname: ldap.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: ldap-codesugar-mx-tls
+    allowedRoutes:
+      namespaces:
+        from: All

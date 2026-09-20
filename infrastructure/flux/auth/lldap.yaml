@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auth
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lldap
+  namespace: auth
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: lldap
+  template:
+    metadata:
+      labels:
+        app: lldap
+    spec:
+      containers:
+      - name: lldap
+        image: lldap/lldap:stable
+        ports:
+        - name: ldap
+          containerPort: 3890
+        - name: http
+          containerPort: 17170
+        env:
+        - name: TZ
+          value: America/Mexico_City
+        - name: LLDAP_LDAP_BASE_DN
+          value: dc=codesugar,dc=mx
+        - name: LLDAP_HTTP_URL
+          value: https://ldap.codesugar.mx
+        # Created out-of-band (not committed): kubectl -n auth create secret generic lldap-secrets \
+        #   --from-literal=LLDAP_JWT_SECRET=... --from-literal=LLDAP_LDAP_USER_PASS=...
+        envFrom:
+        - secretRef:
+            name: lldap-secrets
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        hostPath:
+          path: /var/lib/lldap/data
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lldap
+  namespace: auth
+spec:
+  selector:
+    app: lldap
+  ports:
+  - name: ldap
+    port: 3890
+    targetPort: 3890
+  - name: http
+    port: 17170
+    targetPort: 17170
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: lldap
+  namespace: auth
+spec:
+  parentRefs:
+  - name: main-gateway
+    namespace: gateway-system
+  hostnames:
+  - ldap.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: lldap
+      port: 17170
