@@ -43,3 +43,5 @@ spec:
       replicas: 1
     gatewayAPI:
       enabled: true
+      gatewayClass:
+        create: "true"
