@@ -1,0 +1,32 @@
+# helm upgrade flux-operator oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator  --namespace flux-system --reuse-values --set web.enabled=false
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: flux-web
+  namespace: flux-system
+spec:
+  interval: 30m0s
+  url: oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator
+  layerSelector:
+    mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    operation: copy
+  ref:
+    semver: "0.x"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: flux-web
+  namespace: flux-system
+spec:
+  interval: 30m0s
+  releaseName: flux-web
+  serviceAccountName: flux-operator
+  chartRef:
+    kind: OCIRepository
+    name: flux-web
+  values:
+    fullnameOverride: flux-web
+    installCRDs: false
+    web:
+      serverOnly: true
