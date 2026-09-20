@@ -82,3 +82,15 @@ spec:
     allowedRoutes:
       namespaces:
         from: All
+  - name: forejo-https
+    protocol: HTTPS
+    port: 443
+    hostname: git.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: forejo-codesugar-mx-tls
+    allowedRoutes:
+      namespaces:
+        from: All
