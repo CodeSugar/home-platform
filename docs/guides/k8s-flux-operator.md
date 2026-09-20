@@ -154,3 +154,113 @@ kubectl -n flux-system get gitrepositories,kustomizations
 kubectl -n flux-system describe kustomization home-platform
 kubectl -n flux-system logs deploy/kustomize-controller
 ```
+
+## Force a reconciliation with kubectl
+
+`flux reconcile` is only an annotation write, so you never actually need the CLI.
+Every Flux resource watches `reconcile.fluxcd.io/requestedAt`: when the value
+differs from the `.status.lastHandledReconcileAt` the controller already recorded,
+the object is queued immediately instead of waiting for its `interval`. The value
+itself is meaningless — it just has to change — and `$(date +%s)` is the convention.
+
+`--field-manager=flux-client-side-apply` is what the CLI uses. Keeping the same
+field manager stops kustomize-controller from fighting you over ownership of the
+annotation on the next apply.
+
+### Pull the latest commit and apply it
+
+Annotating the Kustomization alone re-applies whatever revision the source has
+already fetched. To pick up a commit you just pushed, poke the GitRepository
+first and let it report the new SHA before poking the Kustomization:
+
+```bash
+# flux reconcile source git home-platform
+kubectl -n flux-system annotate --field-manager=flux-client-side-apply --overwrite \
+  gitrepository/home-platform reconcile.fluxcd.io/requestedAt="$(date +%s)"
+
+# wait until REVISION shows the new commit, then Ctrl-C
+kubectl -n flux-system get gitrepository home-platform -w
+
+# flux reconcile kustomization home-platform
+kubectl -n flux-system annotate --field-manager=flux-client-side-apply --overwrite \
+  kustomization/home-platform reconcile.fluxcd.io/requestedAt="$(date +%s)"
+```
+
+### Helm releases
+
+Same annotation, but the HelmRelease lives in the namespace it was declared in
+(`cilium` in `kube-system`, `flux-web` in `flux-system`):
+
+```bash
+kubectl -n kube-system annotate --field-manager=flux-client-side-apply --overwrite \
+  helmrelease/cilium reconcile.fluxcd.io/requestedAt="$(date +%s)"
+```
+
+That is a no-op when the release is already up to date. To push a Helm upgrade
+through anyway (`flux reconcile helmrelease --force`), add `forceAt` — it only
+counts when `requestedAt` carries the *same* value:
+
+```bash
+TOKEN="$(date +%s)"
+kubectl -n flux-system annotate --field-manager=flux-client-side-apply --overwrite \
+  helmrelease/flux-web \
+  reconcile.fluxcd.io/requestedAt="$TOKEN" \
+  reconcile.fluxcd.io/forceAt="$TOKEN"
+```
+
+If a release burned through its `remediation.retries` and stopped trying,
+`resetAt` clears the failure counters — again paired with `requestedAt`:
+
+```bash
+TOKEN="$(date +%s)"
+kubectl -n kube-system annotate --field-manager=flux-client-side-apply --overwrite \
+  helmrelease/cilium \
+  reconcile.fluxcd.io/requestedAt="$TOKEN" \
+  reconcile.fluxcd.io/resetAt="$TOKEN"
+```
+
+### The FluxInstance itself
+
+The operator honours the same annotation, so you can make it re-check for a new
+Flux 2.x release without waiting an hour:
+
+```bash
+kubectl -n flux-system annotate --overwrite \
+  fluxinstance/flux reconcile.fluxcd.io/requestedAt="$(date +%s)"
+```
+
+Here `reconcile.fluxcd.io/forceAt` means something different than it does for a
+HelmRelease: it migrates every Flux resource in the cluster to its latest API
+version. Useful after a major Flux upgrade, not something to run casually.
+
+### Suspend and resume
+
+`flux suspend` / `flux resume` are just a field in the spec:
+
+```bash
+kubectl -n flux-system patch kustomization home-platform \
+  --type=merge -p '{"spec":{"suspend":true}}'
+
+kubectl -n flux-system patch kustomization home-platform \
+  --type=merge -p '{"spec":{"suspend":false}}'
+```
+
+The FluxInstance is the exception — it pauses via an operator annotation:
+
+```bash
+kubectl -n flux-system annotate --overwrite \
+  fluxinstance/flux fluxcd.controlplane.io/reconcile=disabled
+```
+
+### Did it actually run?
+
+The controller copies your token into `lastHandledReconcileAt` once it picks the
+request up, so comparing the two tells you whether it was seen:
+
+```bash
+kubectl -n flux-system get kustomization home-platform \
+  -o jsonpath='{.status.lastHandledReconcileAt}{"\n"}'
+
+kubectl -n flux-system wait kustomization/home-platform \
+  --for=condition=Ready --timeout=2m
+```

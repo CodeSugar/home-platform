@@ -34,3 +34,15 @@ spec:
     allowedRoutes:
       namespaces:
         from: All
+  - name: test2-https
+    protocol: HTTPS
+    port: 443
+    hostname: test2.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: test2-codesugar-mx-tls
+    allowedRoutes:
+      namespaces:
+        from: All
