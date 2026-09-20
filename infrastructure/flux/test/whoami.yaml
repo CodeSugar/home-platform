@@ -6,25 +6,25 @@ metadata:
 apiVersion: v1
 kind: Pod
 metadata:
-  name: nginx
+  name: whoami
   namespace: test2
   labels:
-    app: nginx
+    app: whoami
 spec:
   containers:
-  - name: nginx
-    image: nginx:1.14.2
+  - name: whoami
+    image: traefik/whoami:v1.10.3
     ports:
     - containerPort: 80
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: nginx
+  name: whoami
   namespace: test2
 spec:
   selector:
-    app: nginx
+    app: whoami
   ports:
   - name: http
     port: 80
@@ -33,7 +33,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: nginx
+  name: whoami
   namespace: test2
 spec:
   parentRefs:
@@ -47,5 +47,5 @@ spec:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: nginx
+    - name: whoami
       port: 80
