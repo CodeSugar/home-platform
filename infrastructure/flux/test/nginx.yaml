@@ -39,7 +39,6 @@ spec:
   parentRefs:
   - name: main-gateway
     namespace: gateway-system
-    sectionName: http
   hostnames:
   - test.codesugar.mx
   rules:
