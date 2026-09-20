@@ -58,3 +58,27 @@ spec:
     allowedRoutes:
       namespaces:
         from: All
+  - name: webhook-flux-https
+    protocol: HTTPS
+    port: 443
+    hostname: webhook-flux.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: webhook-flux-codesugar-mx-tls
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: jellyfin-https
+    protocol: HTTPS
+    port: 443
+    hostname: jellyfin.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: jellyfin-codesugar-mx-tls
+    allowedRoutes:
+      namespaces:
+        from: All

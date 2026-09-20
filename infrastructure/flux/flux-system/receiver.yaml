@@ -1,0 +1,41 @@
+# Requires the token secret (not stored in git):
+#   kubectl -n flux-system create secret generic webhook-token \
+#     --from-literal=token=$(head -c 32 /dev/urandom | shasum | cut -d ' ' -f1)
+# GitHub webhook payload URL: https://webhook-flux.codesugar.mx + Receiver .status.webhookPath
+# (content type application/json, secret = the token above)
+apiVersion: notification.toolkit.fluxcd.io/v1
+kind: Receiver
+metadata:
+  name: home-platform
+  namespace: flux-system
+spec:
+  type: github
+  events:
+  - ping
+  - push
+  secretRef:
+    name: webhook-token
+  resources:
+  - apiVersion: source.toolkit.fluxcd.io/v1
+    kind: GitRepository
+    name: home-platform
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: webhook-receiver
+  namespace: flux-system
+spec:
+  parentRefs:
+  - name: main-gateway
+    namespace: gateway-system
+  hostnames:
+  - webhook-flux.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /hook/
+    backendRefs:
+    - name: webhook-receiver
+      port: 80
