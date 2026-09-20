@@ -1,0 +1,31 @@
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: gateway-host-access
+spec:
+  endpointSelector:
+    matchLabels:
+      reserved:ingress: ""
+  ingress:
+  # Trusted sources: all hosts DEFAULT
+  - fromCIDR:
+    - 192.168.0.0/16
+    - 201.119.42.162/32
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      - port: "443"
+        protocol: TCP
+  # Everyone else: PUBLIC HOSTS only
+  - fromEntities:
+    - world
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      - port: "443"
+        protocol: TCP
+      rules:
+        http:
+        - host: "test\\.codesugar\\.mx"
