@@ -29,13 +29,6 @@ spec:
         volumeMounts:
         - name: workspace
           mountPath: /workspace
-        readinessProbe:
-          tcpSocket:
-            port: http
-        livenessProbe:
-          tcpSocket:
-            port: http
-          initialDelaySeconds: 30
       volumes:
       - name: workspace
         hostPath:
