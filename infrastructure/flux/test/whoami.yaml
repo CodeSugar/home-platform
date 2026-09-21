@@ -49,3 +49,47 @@ spec:
     backendRefs:
     - name: whoami
       port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: whoami
+  namespace: test
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: whoami.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: whoami-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: whoami-ls
+  namespace: test
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: whoami
+    sectionName: https
+  hostnames:
+  - whoami.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: whoami
+      port: 80

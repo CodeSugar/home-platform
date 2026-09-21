@@ -29,5 +29,6 @@ spec:
       rules:
         http:
         - host: "test\\.codesugar\\.mx"
+        - host: "whoami\\.codesugar\\.mx"
         - host: "webhook-flux\\.codesugar\\.mx"
         - host: "jellyfin\\.codesugar\\.mx"

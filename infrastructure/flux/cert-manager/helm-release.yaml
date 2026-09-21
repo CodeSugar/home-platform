@@ -25,5 +25,8 @@ spec:
     config:
       apiVersion: controller.config.cert-manager.io/v1alpha1
       kind: ControllerConfiguration
+      featureGates:
+        ListenerSets: true
       gatewayAPI:
         enabled: true
+        enableListenerSet: true
