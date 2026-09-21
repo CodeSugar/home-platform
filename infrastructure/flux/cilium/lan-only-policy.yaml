@@ -43,3 +43,4 @@ spec:
         - host: "whoami\\.codesugar\\.mx"
         - host: "webhook-flux\\.codesugar\\.mx"
         - host: "jellyfin\\.codesugar\\.mx"
+        - host: "openwebui\\.codesugar\\.mx"
