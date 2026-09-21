@@ -17,6 +17,18 @@ spec:
         protocol: TCP
       - port: "443"
         protocol: TCP
+  # Everyone else: ACME HTTP-01 challenge path only, on any host (so private
+  # hosts can still get certificates from Let's Encrypt)
+  - fromEntities:
+    - world
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      rules:
+        http:
+        - method: GET
+          path: "/\\.well-known/acme-challenge/.+"
   # Everyone else: PUBLIC HOSTS only
   - fromEntities:
     - world
