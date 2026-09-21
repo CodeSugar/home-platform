@@ -66,14 +66,38 @@ spec:
     targetPort: 17170
 ---
 apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: lldap
+  namespace: auth
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: ldap.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: ldap-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: lldap
   namespace: auth
 spec:
   parentRefs:
-  - name: main-gateway
-    namespace: gateway-system
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: lldap
+    sectionName: https
   hostnames:
   - lldap.codesugar.mx
   rules:

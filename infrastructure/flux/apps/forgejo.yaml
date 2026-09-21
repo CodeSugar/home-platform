@@ -76,14 +76,38 @@ spec:
     targetPort: 3000
 ---
 apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: forgejo
+  namespace: forgejo
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: git.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: forejo-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: forgejo
   namespace: forgejo
 spec:
   parentRefs:
-  - name: main-gateway
-    namespace: gateway-system
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: forgejo
+    sectionName: https
   hostnames:
   - git.codesugar.mx
   rules:
