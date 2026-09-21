@@ -50,3 +50,18 @@ spec:
         enabled: true
       ui:
         enabled: true
+      metrics:
+        enabled:
+        - flow:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,destination_namespace
+        - port-distribution:labelsContext=source_namespace,destination_namespace
+        - tcp
+        - icmp
+        - drop
+        - dns:query
+      export:
+        static:
+          enabled: true
+          filePath: /var/run/cilium/hubble/events.log
+          allowList:
+          - '{"destination_port":["53","80","443"]}'
+          - '{"source_port":["53","80","443"]}'
