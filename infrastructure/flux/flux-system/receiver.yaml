@@ -39,3 +39,23 @@ spec:
     backendRefs:
     - name: webhook-receiver
       port: 80
+---
+# FluxInstance sets networkPolicy: true, whose allow-webhooks policy only matches
+# pod/namespace sources. Cilium Gateway traffic comes from the reserved "ingress"
+# identity, which those rules don't match, so allow it explicitly.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-gateway-webhooks
+  namespace: flux-system
+spec:
+  endpointSelector:
+    matchLabels:
+      app: notification-controller
+  ingress:
+  - fromEntities:
+    - ingress
+    toPorts:
+    - ports:
+      - port: "9292"
+        protocol: TCP

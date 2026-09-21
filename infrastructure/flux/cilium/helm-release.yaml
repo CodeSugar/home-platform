@@ -45,3 +45,6 @@ spec:
       enabled: true
       gatewayClass:
         create: "true"
+    hubble:
+      relay:
+        enabled: true
