@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubeshark
+  labels:
+    # Workers are privileged and use hostNetwork
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kubeshark
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  url: https://helm.kubeshark.com
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kubeshark
+  namespace: kubeshark
+spec:
+  interval: 30m0s
+  releaseName: kubeshark
+  targetNamespace: kubeshark
+  storageNamespace: kubeshark
+  chart:
+    spec:
+      chart: kubeshark
+      version: "53.4.0"
+      sourceRef:
+        kind: HelmRepository
+        name: kubeshark
+        namespace: flux-system
+      interval: 1h0m0s
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+      remediateLastFailure: false
+  postRenderers:
+  - kustomize:
+      patches:
+      - target:
+          kind: DaemonSet
+          name: kubeshark-worker-daemon-set
+        patch: |
+          apiVersion: apps/v1
+          kind: DaemonSet
+          metadata:
+            name: kubeshark-worker-daemon-set
+          spec:
+            template:
+              spec:
+                volumes:
+                - name: data
+                  emptyDir:
+                    medium: Memory
+  values:
+    tap:
+      # Only capture traffic of the zed namespace
+      namespaces:
+      - zed
+      # Max 1Gi of capture data per node (raw + dissection db fit inside it)
+      storageLimit: 1Gi
+      capture:
+        raw:
+          storageSize: 512Mi
+        dbMaxSize: 256Mi
+      snapshots:
+        local:
+          storageSize: 1Gi
+      # No IdP: everybody gets the read-only role
+      auth:
+        enabled: false
+        defaultRole: kubeshark-viewer
+      telemetry:
+        enabled: false
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: kubeshark
+  namespace: kubeshark
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: kubeshark.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: kubeshark-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kubeshark
+  namespace: kubeshark
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: kubeshark
+    sectionName: https
+  hostnames:
+  - kubeshark.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: kubeshark-front
+      port: 80
