@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: webtop-xfce
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webtop-xfce
+  namespace: webtop-xfce
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: webtop-xfce
+  template:
+    metadata:
+      labels:
+        app: webtop-xfce
+    spec:
+      containers:
+      - name: webtop
+        image: lscr.io/linuxserver/webtop:ubuntu-xfce
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: PUID
+          value: "1000"
+        - name: PGID
+          value: "1000"
+        - name: TZ
+          value: America/Mexico_City
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: dshm
+          mountPath: /dev/shm
+      volumes:
+      - name: config
+        hostPath:
+          path: /zpool-ssd/k8s/webtop-xfce/config
+          type: Directory
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webtop-xfce
+  namespace: webtop-xfce
+spec:
+  selector:
+    app: webtop-xfce
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: webtop-xfce
+  namespace: webtop-xfce
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: webtop-xfce.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: webtop-xfce-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: webtop-xfce
+  namespace: webtop-xfce
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: webtop-xfce
+    sectionName: https
+  hostnames:
+  - webtop-xfce.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: webtop-xfce
+      port: 80
