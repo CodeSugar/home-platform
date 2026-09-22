@@ -23,6 +23,9 @@ spec:
       containers:
       - name: webtop
         image: lscr.io/linuxserver/webtop:fedora-xfce
+        securityContext:
+          seccompProfile:
+            type: Unconfined
         ports:
         - containerPort: 3000
           name: http
@@ -38,6 +41,8 @@ spec:
           mountPath: /config
         - name: dshm
           mountPath: /dev/shm
+        - name: gpu-hardware
+          mountPath: /dev/dri
       volumes:
       - name: config
         hostPath:
@@ -47,6 +52,9 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 1Gi
+      - name: gpu-hardware
+        hostPath:
+          path: /dev/dri
 ---
 apiVersion: v1
 kind: Service
