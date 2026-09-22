@@ -24,6 +24,7 @@ spec:
       - name: webtop
         image: lscr.io/linuxserver/webtop:ubuntu-kde
         securityContext:
+          privileged: true
           seccompProfile:
             type: Unconfined
         ports:
