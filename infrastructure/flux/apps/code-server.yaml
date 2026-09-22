@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: code-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: code-server
+  namespace: code-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: code-server
+  template:
+    metadata:
+      labels:
+        app: code-server
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: code-server
+        image: codercom/code-server:latest
+        env:
+        - name: DOCKER_USER
+          value: coder
+        ports:
+        - containerPort: 8080
+          name: http
+        volumeMounts:
+        - name: local
+          mountPath: /home/coder/.local
+        - name: config
+          mountPath: /home/coder/.config
+        - name: project
+          mountPath: /home/coder/project
+      volumes:
+      - name: local
+        hostPath:
+          path: /zpool-ssd/k8s/code-server/local
+          type: Directory
+      - name: config
+        hostPath:
+          path: /zpool-ssd/k8s/code-server/config
+          type: Directory
+      - name: project
+        hostPath:
+          path: /zpool-ssd/k8s/code-server/project
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: code-server
+  namespace: code-server
+spec:
+  selector:
+    app: code-server
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: code-server
+  namespace: code-server
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: code.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: code-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: code-server
+  namespace: code-server
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: code-server
+    sectionName: https
+  hostnames:
+  - code.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: code-server
+      port: 80
