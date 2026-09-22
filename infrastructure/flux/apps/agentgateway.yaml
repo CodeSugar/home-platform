@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentgateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentgateway
+  namespace: agentgateway
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agentgateway
+  template:
+    metadata:
+      labels:
+        app: agentgateway
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      volumes:
+      - name: config
+        hostPath:
+          path: /zpool-ssd/k8s/agentgateway/config
+          type: Directory
+      containers:
+      - name: agentgateway
+        image: cr.agentgateway.dev/agentgateway:v1.5.0
+        ports:
+        - containerPort: 4000
+          name: http
+        volumeMounts:
+        - name: config
+          mountPath: /config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentgateway
+  namespace: agentgateway
+spec:
+  selector:
+    app: agentgateway
+  ports:
+  - name: http
+    port: 80
+    targetPort: 4000
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: agentgateway
+  namespace: agentgateway
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: agentgateway.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: agentgateway-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: agentgateway
+  namespace: agentgateway
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: agentgateway
+    sectionName: https
+  hostnames:
+  - agentgateway.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: agentgateway
+      port: 80
