@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: webtop
-        image: lscr.io/linuxserver/webtop:fedora-xfce
+        image: lscr.io/linuxserver/webtop:ubuntu-kde
         securityContext:
           seccompProfile:
             type: Unconfined
