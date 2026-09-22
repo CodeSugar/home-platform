@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: webtop
-        image: lscr.io/linuxserver/webtop:ubuntu-xfce
+        image: lscr.io/linuxserver/webtop:fedora-xfce
         ports:
         - containerPort: 3000
           name: http
