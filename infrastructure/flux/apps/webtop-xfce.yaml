@@ -44,6 +44,12 @@ spec:
           mountPath: /dev/shm
         - name: gpu-hardware
           mountPath: /dev/dri
+        - name: binder
+          mountPath: /dev/binder
+        - name: vndbinder
+          mountPath: /dev/vndbinder
+        - name: hwbinder
+          mountPath: /dev/hwbinder
       volumes:
       - name: config
         hostPath:
@@ -56,6 +62,18 @@ spec:
       - name: gpu-hardware
         hostPath:
           path: /dev/dri
+      - name: binder
+        hostPath:
+          path: /dev/binder
+          type: CharDevice
+      - name: vndbinder
+        hostPath:
+          path: /dev/vndbinder
+          type: CharDevice
+      - name: hwbinder
+        hostPath:
+          path: /dev/hwbinder
+          type: CharDevice
 ---
 apiVersion: v1
 kind: Service
