@@ -32,6 +32,9 @@ spec:
       containers:
       - name: agentgateway
         image: cr.agentgateway.dev/agentgateway:v1.5.0
+        env:
+        - name: LOCAL_XDS_PATH
+          value: /config/config.yaml
         ports:
         - containerPort: 4000
           name: http
