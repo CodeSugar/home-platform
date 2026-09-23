@@ -53,5 +53,6 @@ to its app. Flux watches this repo and reconciles the cluster to match it.
 | [disk-mirror-zfs.md](docs/guides/disk-mirror-zfs.md) | ZFS vs mdadm, pool/dataset layout, ARC tuning for Kubernetes |
 | [k8s-cilium.md](docs/guides/k8s-cilium.md) | Cilium install/upgrade flags and the Gateway API |
 | [k8s-cert-manager.md](docs/guides/k8s-cert-manager.md) | How gateway-shim and HTTP-01 issue TLS certs for the Gateway, adding a new host |
+| [k8s-auth.md](docs/guides/k8s-auth.md) | Authelia + LLDAP single sign-on, enforced by Envoy Gateway behind main-gateway, protecting a new app |
 | [k8s-flux-operator.md](docs/guides/k8s-flux-operator.md) | Bootstrapping the Flux Operator and wiring this repo up for GitOps |
 
