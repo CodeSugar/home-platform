@@ -50,6 +50,8 @@ spec:
       labels:
         app: authelia
     spec:
+      # Service "authelia" would inject AUTHELIA_PORT=tcp://... etc., which Authelia parses as config
+      enableServiceLinks: false
       containers:
       - name: authelia
         image: authelia/authelia:latest
