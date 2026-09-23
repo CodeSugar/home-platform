@@ -45,4 +45,5 @@ spec:
         - host: "jellyfin\\.codesugar\\.mx"
         - host: "openwebui\\.codesugar\\.mx"
         - host: "webtop\\.codesugar\\.mx"
+        - host: "webtop-2\\.codesugar\\.mx"
         - host: "auth\\.codesugar\\.mx"

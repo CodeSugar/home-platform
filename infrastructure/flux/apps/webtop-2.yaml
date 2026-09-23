@@ -1,0 +1,214 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: webtop-2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webtop-2
+  namespace: webtop-2
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: webtop-2
+  template:
+    metadata:
+      labels:
+        app: webtop-2
+    spec:
+      containers:
+      - name: webtop-2
+        image: lscr.io/linuxserver/webtop:ubuntu-kde
+        securityContext:
+          privileged: true
+          seccompProfile:
+            type: Unconfined
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: PUID
+          value: "1000"
+        - name: PGID
+          value: "1000"
+        - name: TZ
+          value: America/Mexico_City
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        # NEW: reuses the same persistent "config" volume/hostPath, just
+        # mounted a second time at the path linuxserver.io's s6 init reads
+        # custom startup scripts from. This is what makes
+        # /config/custom-cont-init.d/10-waydroid-setup.sh actually run on
+        # boot instead of silently doing nothing. subPath requires the
+        # directory to already exist on the host — it does, created once
+        # from inside the running container (`mkdir /config/custom-cont-init.d`).
+        - name: config
+          mountPath: /custom-cont-init.d
+          subPath: custom-cont-init.d
+        - name: dshm
+          mountPath: /dev/shm
+        - name: gpu-hardware
+          mountPath: /dev/dri
+        - name: binder
+          mountPath: /dev/binder
+        - name: vndbinder
+          mountPath: /dev/vndbinder
+        - name: hwbinder
+          mountPath: /dev/hwbinder
+      volumes:
+      - name: config
+        hostPath:
+          path: /zpool-ssd/k8s/webtop-2/config
+          type: Directory
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: gpu-hardware
+        hostPath:
+          path: /dev/dri
+      - name: binder
+        hostPath:
+          path: /dev/binder
+          type: CharDevice
+      - name: vndbinder
+        hostPath:
+          path: /dev/vndbinder
+          type: CharDevice
+      - name: hwbinder
+        hostPath:
+          path: /dev/hwbinder
+          type: CharDevice
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webtop-2
+  namespace: webtop-2
+spec:
+  selector:
+    app: webtop-2
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: webtop-2
+  namespace: webtop-2
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: webtop-2.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: webtop-2-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: webtop-2
+  namespace: webtop-2
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: webtop-2
+    sectionName: https
+  hostnames:
+  - webtop-2.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    # Hand off to Envoy Gateway, which enforces Authelia (see SecurityPolicy below)
+    backendRefs:
+    - name: envoy-internal
+      namespace: envoy-gateway-system
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: webtop-2-internal
+  namespace: webtop-2
+spec:
+  parentRefs:
+  - name: internal-gateway
+    namespace: envoy-gateway-system
+  hostnames:
+  - webtop-2.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    # Long-lived desktop streaming (websockets); don't cut requests after Envoy's 15s default
+    timeouts:
+      request: "0s"
+    backendRefs:
+    - name: webtop-2
+      port: 80
+---
+# https://www.authelia.com/integration/kubernetes/envoy/gateway/
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: authelia-extauthz
+  namespace: webtop-2
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: webtop-2-internal
+  extAuth:
+    headersToExtAuth:
+    - accept
+    - cookie
+    - authorization
+    - proxy-authorization
+    - x-forwarded-proto
+    failOpen: false
+    http:
+      backendRefs:
+      - name: authelia
+        namespace: auth
+        port: 9091
+      path: /api/authz/ext-authz/
+      headersToBackend:
+      - Remote-User
+      - Remote-Groups
+      - Remote-Name
+      - Remote-Email
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: webtop-2-securitypolicy-to-authelia
+  namespace: auth
+spec:
+  from:
+  - group: gateway.envoyproxy.io
+    kind: SecurityPolicy
+    namespace: webtop-2
+  to:
+  - group: ""
+    kind: Service
+    name: authelia
