@@ -134,6 +134,8 @@ spec:
           mountPath: /home/coder/.config
         - name: project
           mountPath: /home/coder/project
+        - name: ssh
+          mountPath: /home/coder/.ssh
       volumes:
       - name: local
         hostPath:
@@ -146,6 +148,10 @@ spec:
       - name: project
         hostPath:
           path: /zpool-ssd/k8s/code-server/project
+          type: Directory
+      - name: ssh
+        hostPath:
+          path: /zpool-ssd/k8s/code-server/ssh
           type: Directory
 ---
 apiVersion: v1
