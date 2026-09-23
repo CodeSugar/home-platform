@@ -1,0 +1,123 @@
+# Envoy Gateway, running as an internal tier behind Cilium's main-gateway.
+# main-gateway keeps TLS, certs and the LAN-only policy; hosts that need Envoy Gateway
+# features (e.g. SecurityPolicy ext-auth with Authelia) are routed from main-gateway
+# to the ClusterIP service "envoy-internal" and handled by internal-gateway.
+#
+# CRDs live in ./crds (rendered from gateway-crds-helm with crds.envoyGateway.enabled=true,
+# Gateway API CRDs stay in ../../api-gateway). Keep chart and CRD versions in sync:
+#   helm template x oci://docker.io/envoyproxy/gateway-crds-helm --version vX.Y.Z \
+#     --set crds.envoyGateway.enabled=true
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: envoy-gateway-system
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: envoy-gateway
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  url: oci://docker.io/envoyproxy/gateway-helm
+  layerSelector:
+    mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    operation: copy
+  ref:
+    tag: "v1.9.1"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: envoy-gateway
+  namespace: envoy-gateway-system
+spec:
+  interval: 30m0s
+  releaseName: envoy-gateway
+  targetNamespace: envoy-gateway-system
+  storageNamespace: envoy-gateway-system
+  chartRef:
+    kind: OCIRepository
+    name: envoy-gateway
+    namespace: flux-system
+  install:
+    crds: Skip
+    remediation:
+      retries: 3
+  upgrade:
+    crds: Skip
+    remediation:
+      retries: 3
+      remediateLastFailure: false
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: internal
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        name: envoy-internal
+        type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy-gateway
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: internal
+    namespace: envoy-gateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: internal-gateway
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: All
+---
+# Trust the X-Forwarded-For / X-Forwarded-Proto set by main-gateway, otherwise Envoy
+# rewrites X-Forwarded-Proto to "http" and Authelia builds http:// redirects.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: trust-main-gateway
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: internal-gateway
+  clientIPDetection:
+    xForwardedFor:
+      numTrustedHops: 1
+---
+# Lets HTTPRoutes on main-gateway forward to envoy-internal; add a "from" entry per app namespace.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-routes-to-envoy-internal
+  namespace: envoy-gateway-system
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: test2
+  to:
+  - group: ""
+    kind: Service
+    name: envoy-internal

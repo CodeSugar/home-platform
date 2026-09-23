@@ -70,6 +70,74 @@ spec:
     - path:
         type: PathPrefix
         value: /
+    # Hand off to Envoy Gateway, which enforces Authelia (see SecurityPolicy below)
+    backendRefs:
+    - name: envoy-internal
+      namespace: envoy-gateway-system
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: whoami-private
+  namespace: test2
+spec:
+  parentRefs:
+  - name: internal-gateway
+    namespace: envoy-gateway-system
+  hostnames:
+  - whoami-private.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
     backendRefs:
     - name: whoami
       port: 80
+---
+# https://www.authelia.com/integration/kubernetes/envoy/gateway/
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: authelia-extauthz
+  namespace: test2
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: whoami-private
+  extAuth:
+    headersToExtAuth:
+    - accept
+    - cookie
+    - authorization
+    - proxy-authorization
+    - x-forwarded-proto
+    failOpen: false
+    http:
+      backendRefs:
+      - name: authelia
+        namespace: auth
+        port: 9091
+      path: /api/authz/ext-authz/
+      headersToBackend:
+      - Remote-User
+      - Remote-Groups
+      - Remote-Name
+      - Remote-Email
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: test2-securitypolicy-to-authelia
+  namespace: auth
+spec:
+  from:
+  - group: gateway.envoyproxy.io
+    kind: SecurityPolicy
+    namespace: test2
+  to:
+  - group: ""
+    kind: Service
+    name: authelia
