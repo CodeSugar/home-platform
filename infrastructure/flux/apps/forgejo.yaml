@@ -38,6 +38,10 @@ spec:
           value: "1000"
         - name: USER_GID
           value: "1000"
+        - name: FORGEJO__server__SSH_DOMAIN
+          value: git.codesugar.mx
+        - name: FORGEJO__server__SSH_PORT
+          value: "22"
         ports:
         - containerPort: 3000
           name: http
@@ -74,6 +78,9 @@ spec:
   - name: http
     port: 80
     targetPort: 3000
+  - name: ssh
+    port: 22
+    targetPort: 22
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: ListenerSet
@@ -96,6 +103,10 @@ spec:
       mode: Terminate
       certificateRefs:
       - name: forejo-codesugar-mx-tls
+  # Plain L4 passthrough, handled by Cilium's eBPF LB (not Envoy)
+  - name: ssh
+    protocol: TCP
+    port: 22
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -118,3 +129,19 @@ spec:
     backendRefs:
     - name: forgejo
       port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata:
+  name: forgejo-ssh
+  namespace: forgejo
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: forgejo
+    sectionName: ssh
+  rules:
+  - backendRefs:
+    - name: forgejo
+      port: 22
