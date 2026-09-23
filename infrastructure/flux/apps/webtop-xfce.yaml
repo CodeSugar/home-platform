@@ -1,24 +1,24 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: webtop-xfce
+  name: webtop
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: webtop-xfce
-  namespace: webtop-xfce
+  name: webtop
+  namespace: webtop
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: webtop-xfce
+      app: webtop
   template:
     metadata:
       labels:
-        app: webtop-xfce
+        app: webtop
     spec:
       containers:
       - name: webtop
@@ -40,6 +40,16 @@ spec:
         volumeMounts:
         - name: config
           mountPath: /config
+        # NEW: reuses the same persistent "config" volume/hostPath, just
+        # mounted a second time at the path linuxserver.io's s6 init reads
+        # custom startup scripts from. This is what makes
+        # /config/custom-cont-init.d/10-waydroid-setup.sh actually run on
+        # boot instead of silently doing nothing. subPath requires the
+        # directory to already exist on the host — it does, created once
+        # from inside the running container (`mkdir /config/custom-cont-init.d`).
+        - name: config
+          mountPath: /custom-cont-init.d
+          subPath: custom-cont-init.d
         - name: dshm
           mountPath: /dev/shm
         - name: gpu-hardware
@@ -78,11 +88,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: webtop-xfce
-  namespace: webtop-xfce
+  name: webtop
+  namespace: webtop
 spec:
   selector:
-    app: webtop-xfce
+    app: webtop
   ports:
   - name: http
     port: 80
@@ -91,8 +101,8 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: ListenerSet
 metadata:
-  name: webtop-xfce
-  namespace: webtop-xfce
+  name: webtop
+  namespace: webtop
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     acme.cert-manager.io/http01-parentreffallback: "true"
@@ -104,30 +114,30 @@ spec:
   - name: https
     protocol: HTTPS
     port: 443
-    hostname: webtop-xfce.codesugar.mx
+    hostname: webtop.codesugar.mx
     tls:
       mode: Terminate
       certificateRefs:
-      - name: webtop-xfce-codesugar-mx-tls
+      - name: webtop-codesugar-mx-tls
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: webtop-xfce
-  namespace: webtop-xfce
+  name: webtop
+  namespace: webtop
 spec:
   parentRefs:
   - group: gateway.networking.k8s.io
     kind: ListenerSet
-    name: webtop-xfce
+    name: webtop
     sectionName: https
   hostnames:
-  - webtop-xfce.codesugar.mx
+  - webtop.codesugar.mx
   rules:
   - matches:
     - path:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: webtop-xfce
+    - name: webtop
       port: 80
