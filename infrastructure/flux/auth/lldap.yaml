@@ -81,11 +81,11 @@ spec:
   - name: https
     protocol: HTTPS
     port: 443
-    hostname: ldap.codesugar.mx
+    hostname: lldap.codesugar.mx
     tls:
       mode: Terminate
       certificateRefs:
-      - name: ldap-codesugar-mx-tls
+      - name: lldap-codesugar-mx-tls
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
