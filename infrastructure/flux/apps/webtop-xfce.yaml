@@ -138,6 +138,77 @@ spec:
     - path:
         type: PathPrefix
         value: /
+    # Hand off to Envoy Gateway, which enforces Authelia (see SecurityPolicy below)
+    backendRefs:
+    - name: envoy-internal
+      namespace: envoy-gateway-system
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: webtop-internal
+  namespace: webtop
+spec:
+  parentRefs:
+  - name: internal-gateway
+    namespace: envoy-gateway-system
+  hostnames:
+  - webtop.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    # Long-lived desktop streaming (websockets); don't cut requests after Envoy's 15s default
+    timeouts:
+      request: "0s"
     backendRefs:
     - name: webtop
       port: 80
+---
+# https://www.authelia.com/integration/kubernetes/envoy/gateway/
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: authelia-extauthz
+  namespace: webtop
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: webtop-internal
+  extAuth:
+    headersToExtAuth:
+    - accept
+    - cookie
+    - authorization
+    - proxy-authorization
+    - x-forwarded-proto
+    failOpen: false
+    http:
+      backendRefs:
+      - name: authelia
+        namespace: auth
+        port: 9091
+      path: /api/authz/ext-authz/
+      headersToBackend:
+      - Remote-User
+      - Remote-Groups
+      - Remote-Name
+      - Remote-Email
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: webtop-securitypolicy-to-authelia
+  namespace: auth
+spec:
+  from:
+  - group: gateway.envoyproxy.io
+    kind: SecurityPolicy
+    namespace: webtop
+  to:
+  - group: ""
+    kind: Service
+    name: authelia

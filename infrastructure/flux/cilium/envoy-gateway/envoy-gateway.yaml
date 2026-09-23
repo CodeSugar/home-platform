@@ -117,6 +117,9 @@ spec:
   - group: gateway.networking.k8s.io
     kind: HTTPRoute
     namespace: test2
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: webtop
   to:
   - group: ""
     kind: Service
