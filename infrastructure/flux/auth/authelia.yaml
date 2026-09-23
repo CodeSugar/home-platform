@@ -11,7 +11,21 @@ data:
       level: info
     theme: auto
     totp:
+      disable: false
       issuer: codesugar.mx
+      # Defaults below are the most compatible with authenticator apps (Google Authenticator, Aegis, etc.)
+      algorithm: SHA1
+      digits: 6
+      period: 30
+      skew: 1
+      secret_size: 32
+      allowed_algorithms:
+      - SHA1
+      allowed_digits:
+      - 6
+      allowed_periods:
+      - 30
+      disable_reuse_security_policy: false
     authentication_backend:
       ldap:
         implementation: lldap
@@ -21,7 +35,7 @@ data:
         # if password reset from Authelia is not needed). Password comes from the secret below.
         user: uid=authelia,ou=people,dc=codesugar,dc=mx
     access_control:
-      default_policy: one_factor
+      default_policy: two_factor
     session:
       cookies:
       - domain: codesugar.mx
