@@ -46,9 +46,10 @@ data:
     notifier:
       filesystem:
         filename: /config/notification.txt
-    # OIDC provider. The {{ secret }} calls are expanded by the template filter
+    # OIDC provider. The "secret" template calls are expanded by the template filter
     # (X_AUTHELIA_CONFIG_FILTERS) from files in authelia-secrets, so no key
     # material is committed. hmac_secret comes from an env _FILE variable.
+    # The filter also runs over comments: never write template braces in one.
     identity_providers:
       oidc:
         jwks:
