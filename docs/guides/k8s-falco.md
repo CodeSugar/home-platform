@@ -105,6 +105,9 @@ Authelia with the same forward-auth setup as `whoami-private` (see
 1. `HTTPRoute/falcosidekick-ui-ls` on main-gateway sends the host to `envoy-internal`.
 2. `HTTPRoute/falcosidekick-ui` on internal-gateway sends it to the UI Service,
    with `SecurityPolicy/authelia-extauthz` checking every request against Authelia.
+   Unlike `whoami-private`, it only forwards the session cookie, not the
+   `Authorization` header (see Troubleshooting: the UI sends a dummy basic-auth
+   header that Authelia would reject).
 3. `ReferenceGrant`s: namespace `falco` is in `allow-routes-to-envoy-internal`
    (`envoy-gateway.yaml`), and `falco-securitypolicy-to-authelia` lives in `auth`.
 4. An Authelia `access_control` rule limits the host to the `ldap-k8s-admin` group
@@ -265,6 +268,14 @@ running and `metacollector.falco.svc:45000` resolves.
 **UI shows no events**: `kubectl -n falco logs deploy/falcosidekick` should show
 `WebUI - POST OK`. A timeout there means the network policy is blocking sidekick
 (check the `app.kubernetes.io/name` label still matches).
+
+**Browser pops a native username/password dialog**: the UI's frontend calls its own
+API with `Authorization: Basic anonymous:anonymous` to detect that its login is
+disabled. If the `SecurityPolicy` forwards `authorization` to Authelia, Authelia tries
+those credentials against LLDAP (`username=anonymous` in its log) and answers `401` with
+`WWW-Authenticate: Basic`. `headersToExtAuth` must not include `authorization` or
+`proxy-authorization` for this route; the session cookie is enough. (This also means
+curl with `-u` basic auth doesn't work for this host.)
 
 **`https://falco.codesugar.mx` returns `403` after logging in**: the user isn't in
 `ldap-k8s-admin`. `500` / `RefNotPermitted`: namespace `falco` missing from
