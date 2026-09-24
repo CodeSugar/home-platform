@@ -1,0 +1,58 @@
+# Falco Operator: reconciles the Falco/Component (instance.falcosecurity.dev) and
+# Rulesfile/Plugin/Config (artifact.falcosecurity.dev) resources in ./falco.yaml.
+#
+# CRDs live in ./crds (copied from the chart's crds/ directory) so kustomize-controller
+# applies them before the CRs in the same Kustomization; the HelmRelease skips them.
+# Keep chart and CRD versions in sync:
+#   helm pull falco-operator --repo https://falcosecurity.github.io/charts \
+#     --version X.Y.Z --untar && cp falco-operator/crds/*.yaml crds/
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco-operator
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: falcosecurity
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  url: https://falcosecurity.github.io/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: falco-operator
+  namespace: falco-operator
+spec:
+  interval: 30m0s
+  releaseName: falco-operator
+  targetNamespace: falco-operator
+  storageNamespace: falco-operator
+  chart:
+    spec:
+      chart: falco-operator
+      # operator v0.4.1 (default Falco 0.44.1)
+      version: "0.3.1"
+      sourceRef:
+        kind: HelmRepository
+        name: falcosecurity
+        namespace: flux-system
+      interval: 1h0m0s
+  install:
+    crds: Skip
+    remediation:
+      retries: 3
+  upgrade:
+    crds: Skip
+    remediation:
+      retries: 3
+      remediateLastFailure: false
+  values:
+    # The operator copies a CR's labels onto what it generates. Flux's labels on the
+    # generated ClusterRole/ClusterRoleBinding (no OwnerReference possible) would make
+    # them look Flux-owned but absent from the inventory, and they'd be fought over.
+    excludedLabels:
+    - kustomize.toolkit.fluxcd.io/*
+    - helm.toolkit.fluxcd.io/*

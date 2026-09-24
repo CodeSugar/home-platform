@@ -123,6 +123,9 @@ spec:
   - group: gateway.networking.k8s.io
     kind: HTTPRoute
     namespace: webtop-2
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: falco
   to:
   - group: ""
     kind: Service

@@ -36,6 +36,15 @@ data:
         user: uid=authelia,ou=people,dc=codesugar,dc=mx
     access_control:
       default_policy: two_factor
+      # First match wins. A host with a group rule needs a trailing deny, otherwise
+      # everyone else falls through to default_policy and is let in.
+      rules:
+      # Falco security events: same audience as the Flux web UI (flux-web.yaml)
+      - domain: falco.codesugar.mx
+        subject: group:ldap-k8s-admin
+        policy: two_factor
+      - domain: falco.codesugar.mx
+        policy: deny
     session:
       cookies:
       - domain: codesugar.mx

@@ -1,0 +1,343 @@
+# Falco runtime security, managed by the Falco Operator (./falco-operator.yaml).
+# Based on the upstream quickstart, with versions pinned instead of "latest":
+#   Falco (DaemonSet, modern_ebpf) -> http_output -> Falcosidekick -> Falcosidekick UI -> Redis
+#   k8smeta plugin <- k8s-metacollector (pod/namespace metadata in alerts)
+#
+# Manual steps before the first reconcile:
+#   mkdir -p /zpool-ssd/k8s/falco/redis
+#
+# The UI (falco.codesugar.mx) is behind Authelia via internal-gateway, limited to the
+# ldap-k8s-admin group (access_control rule in auth/authelia.yaml).
+#
+# Runbook: docs/guides/k8s-falco.md
+#
+# Uninstall order matters (artifacts carry finalizers handled by the sidecar in the
+# Falco pod): delete configs/rulesfiles/plugins first, then falcos/components.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco
+---
+apiVersion: instance.falcosecurity.dev/v1alpha1
+kind: Falco
+metadata:
+  name: falco
+  namespace: falco
+spec:
+  version: "0.44.1"
+---
+# Required by the official rules for container.* fields
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Plugin
+metadata:
+  name: container
+  namespace: falco
+spec:
+  ociArtifact:
+    image:
+      repository: falcosecurity/plugins/plugin/container
+      tag: "0.7.5"
+    registry:
+      name: ghcr.io
+---
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Plugin
+metadata:
+  name: k8smeta
+  namespace: falco
+spec:
+  ociArtifact:
+    image:
+      repository: falcosecurity/plugins/plugin/k8smeta
+      tag: "0.4.2"
+    registry:
+      name: ghcr.io
+  config:
+    initConfig:
+      collectorPort: 45000
+      collectorHostname: metacollector.falco.svc
+      # Set by the operator on the Falco container
+      nodeName: "${FALCO_K8S_NODE_NAME}"
+---
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Rulesfile
+metadata:
+  name: falco-rules
+  namespace: falco
+spec:
+  ociArtifact:
+    image:
+      repository: falcosecurity/rules/falco-rules
+      tag: "5.2.0"
+    registry:
+      name: ghcr.io
+  priority: 50
+---
+# stdout stays on so `kubectl logs` shows events even if sidekick is down
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Config
+metadata:
+  name: falco-output
+  namespace: falco
+spec:
+  config:
+    json_output: true
+    stdout_output:
+      enabled: true
+    http_output:
+      enabled: true
+      url: "http://falcosidekick.falco.svc:2801"
+  priority: 60
+---
+apiVersion: instance.falcosecurity.dev/v1alpha1
+kind: Component
+metadata:
+  name: metacollector
+  namespace: falco
+spec:
+  component:
+    type: metacollector
+    version: "0.1.2"
+  replicas: 1
+---
+# Add more outputs (Slack, ntfy, ...) via env vars on the falcosidekick container:
+# https://github.com/falcosecurity/falcosidekick#outputs
+apiVersion: instance.falcosecurity.dev/v1alpha1
+kind: Component
+metadata:
+  name: falcosidekick
+  namespace: falco
+spec:
+  component:
+    type: falcosidekick
+    version: "2.32.0"
+  replicas: 1
+  podTemplateSpec:
+    spec:
+      containers:
+      - name: falcosidekick
+        env:
+        - name: WEBUI_URL
+          value: "http://falcosidekick-ui.falco.svc:2802"
+---
+# The UI stores events in Redis at the operator's default address
+# falcosidekick-ui-redis:6379. Deployment + hostPath instead of the quickstart's
+# StatefulSet/PVC, as elsewhere in this repo.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: falcosidekick-ui-redis
+  namespace: falco
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falcosidekick-ui-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: falcosidekick-ui-redis
+    spec:
+      containers:
+      - name: redis
+        image: docker.io/redis/redis-stack:7.2.0-v11
+        ports:
+        - containerPort: 6379
+          name: redis
+          protocol: TCP
+        livenessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        readinessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        hostPath:
+          path: /zpool-ssd/k8s/falco/redis
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falcosidekick-ui-redis
+  namespace: falco
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+    name: redis
+  selector:
+    app.kubernetes.io/name: falcosidekick-ui-redis
+---
+apiVersion: instance.falcosecurity.dev/v1alpha1
+kind: Component
+metadata:
+  name: falcosidekick-ui
+  namespace: falco
+spec:
+  component:
+    type: falcosidekick-ui
+    version: "2.2.0"
+  replicas: 1
+  podTemplateSpec:
+    spec:
+      containers:
+      - name: falcosidekick-ui
+        env:
+        # Authelia does the auth. The built-in login is a single shared user:password
+        # (default admin:admin) that also accepts empty credentials, so it adds nothing.
+        # Only safe because allow-falcosidekick-ui-ingress below keeps the pod
+        # reachable solely through internal-gateway (and falcosidekick).
+        - name: FALCOSIDEKICK_UI_DISABLEAUTH
+          value: "true"
+        # Default is no expiry, so Redis would grow forever
+        - name: FALCOSIDEKICK_UI_TTL
+          value: "30d"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: falco
+  namespace: falco
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: falco.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: falco-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: falcosidekick-ui-ls
+  namespace: falco
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: falco
+    sectionName: https
+  hostnames:
+  - falco.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    # Hand off to Envoy Gateway, which enforces Authelia (see SecurityPolicy below)
+    backendRefs:
+    - name: envoy-internal
+      namespace: envoy-gateway-system
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: falcosidekick-ui
+  namespace: falco
+spec:
+  parentRefs:
+  - name: internal-gateway
+    namespace: envoy-gateway-system
+  hostnames:
+  - falco.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: falcosidekick-ui
+      port: 2802
+---
+# https://www.authelia.com/integration/kubernetes/envoy/gateway/
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: authelia-extauthz
+  namespace: falco
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: falcosidekick-ui
+  extAuth:
+    headersToExtAuth:
+    - accept
+    - cookie
+    - authorization
+    - proxy-authorization
+    - x-forwarded-proto
+    failOpen: false
+    http:
+      backendRefs:
+      - name: authelia
+        namespace: auth
+        port: 9091
+      path: /api/authz/ext-authz/
+      headersToBackend:
+      - Remote-User
+      - Remote-Groups
+      - Remote-Name
+      - Remote-Email
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: falco-securitypolicy-to-authelia
+  namespace: auth
+spec:
+  from:
+  - group: gateway.envoyproxy.io
+    kind: SecurityPolicy
+    namespace: falco
+  to:
+  - group: ""
+    kind: Service
+    name: authelia
+---
+# The UI runs with auth disabled, and its API also takes unauthenticated POSTs
+# (event ingestion). Only internal-gateway's Envoy (already past Authelia) and
+# falcosidekick may reach it; any other pod in the cluster is dropped.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-falcosidekick-ui-ingress
+  namespace: falco
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: falcosidekick-ui
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: envoy-gateway-system
+        gateway.envoyproxy.io/owning-gateway-name: internal-gateway
+    - matchLabels:
+        app.kubernetes.io/name: falcosidekick
+    toPorts:
+    - ports:
+      - port: "2802"
+        protocol: TCP

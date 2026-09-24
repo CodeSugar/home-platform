@@ -125,15 +125,27 @@ against LLDAP directly, with no session involved.
         base_dn: dc=codesugar,dc=mx
         user: uid=authelia,ou=people,dc=codesugar,dc=mx
     access_control:
-      default_policy: one_factor
+      default_policy: two_factor
+      rules:
+      - domain: falco.codesugar.mx
+        subject: group:ldap-k8s-admin
+        policy: two_factor
+      - domain: falco.codesugar.mx
+        policy: deny
     session:
       cookies:
       - domain: codesugar.mx
         authelia_url: https://auth.codesugar.mx
 ```
 
-- `default_policy: one_factor` means any valid LLDAP user can reach any protected host.
-  Add `access_control.rules` to restrict a host by group or require `two_factor`.
+- `default_policy: two_factor` means any LLDAP user with a second factor can reach any
+  protected host.
+- `access_control.rules` restrict a host to a group. The first matching rule wins, so a
+  group rule needs a `deny` rule for the same domain after it. Otherwise users outside
+  the group fall through to `default_policy` and get in. `falco.codesugar.mx` is limited
+  to `ldap-k8s-admin` this way (see [k8s-falco.md](k8s-falco.md#access-to-the-ui)).
+- Authelia reads its config only at startup. After a change to the ConfigMap is
+  reconciled, run `kubectl -n auth rollout restart deploy/authelia`.
 - The ext-authz endpoint (`/api/authz/ext-authz/`) is one of Authelia's default authz
   endpoints, so it needs no config.
 - The pod sets `enableServiceLinks: false`. Otherwise Kubernetes injects
