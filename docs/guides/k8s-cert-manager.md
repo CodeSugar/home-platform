@@ -7,11 +7,11 @@ and renewed without anyone touching a manifest.
 
 ```mermaid
 flowchart TD
-    subgraph shim["1 · gateway-shim watches the Gateway"]
+    subgraph shim["1 · gateway-shim watches each app's ListenerSet"]
         direction LR
-        gw["Gateway main-gateway<br/>annotation: cluster-issuer"] -->|per HTTPS listener| cert["Certificate<br/>dnsNames = listener hostname"]
+        ls["ListenerSet (app namespace)<br/>annotation: cluster-issuer<br/>parentRef: main-gateway"] -->|per HTTPS listener| cert["Certificate<br/>dnsNames = listener hostname"]
         cert -->|secretName| sec[("Secret<br/>kubernetes.io/tls")]
-        sec -->|certificateRefs| gw
+        sec -->|certificateRefs| ls
     end
 
     subgraph acme["2 · HTTP-01 over the Gateway API"]
@@ -28,13 +28,17 @@ flowchart TD
 
 Two separate mechanisms do the work.
 
-**gateway-shim** is the automatic part. Annotate a `Gateway` with
-`cert-manager.io/cluster-issuer` and cert-manager reads its HTTPS listeners: for each
-distinct `tls.certificateRefs` secret name it creates and maintains a `Certificate`
-whose DNS names are the hostnames of the listeners pointing at that secret. You never
-write a `Certificate` by hand, and you never renew one.
+**gateway-shim** is the automatic part. `main-gateway` itself only has the plain HTTP
+port 80 listener and `allowedListeners.namespaces.from: All`. Each app brings its own
+HTTPS listener in a `ListenerSet` in its own namespace, attached to `main-gateway`.
+Annotate that `ListenerSet` with `cert-manager.io/cluster-issuer` and cert-manager reads
+its HTTPS listeners: for each distinct `tls.certificateRefs` secret name it creates and
+maintains a `Certificate` in the ListenerSet's namespace, whose DNS names are the
+hostnames of the listeners pointing at that secret. You never write a `Certificate` by
+hand, and you never renew one.
 
-The important limit: cert-manager reads **Gateway listeners**, not `HTTPRoute`s. A
+The important limit: cert-manager reads **listeners** (on a `Gateway` or a
+`ListenerSet`), not `HTTPRoute`s. A
 hostname that only exists on an `HTTPRoute` gets no certificate. Declaring the listener
 is the one manual step per host.
 
@@ -44,13 +48,22 @@ the route to `main-gateway`'s port 80 listener with the hostname being validated
 lets Let's Encrypt fetch `/.well-known/acme-challenge/<token>` over plain HTTP. Once the
 order is valid the three objects are deleted again.
 
+The app's `ListenerSet` only has an HTTPS listener, so it has nowhere to attach the
+solver route. The `acme.cert-manager.io/http01-parentreffallback: "true"` annotation on
+the `ListenerSet` makes cert-manager fall back to the issuer's `parentRefs`, which point
+at `main-gateway` (see [Issuers](#issuers)). Without it, challenges never become
+reachable.
+
 ## Prerequisites
 
 - Public `A` record for every hostname pointing at the WAN IP.
 - Router forwarding **80** → `192.168.1.210` (required by HTTP-01) and **443** for real
   traffic.
-- Gateway API CRDs installed before cert-manager starts — they already are, in
-  `infrastructure/flux/api-gateway/`.
+- Gateway API CRDs (v1.6, which includes `ListenerSet`) installed before cert-manager
+  starts. They already are, in `infrastructure/flux/api-gateway/`.
+- `lan-only-policy` (`infrastructure/flux/cilium/lan-only-policy.yaml`) lets anyone
+  on the internet reach `/.well-known/acme-challenge/` on port 80 for **any** hostname.
+  That way, LAN-only hosts still get certificates. Keep that rule when you edit the policy.
 
 Wildcards are not possible here: ACME refuses HTTP-01 for `*.codesugar.mx`, so a
 wildcard SAN would need a DNS-01 solver instead.
@@ -111,34 +124,68 @@ registered domain per week and failed orders still count against you.
 
 ## Adding a host
 
-Add one listener block to `infrastructure/flux/cilium/gateway.yaml` and commit:
+Put a `ListenerSet` in the app's own manifest, next to its `Service`, and commit. The
+example below is for an app `grafana` in namespace `monitoring`:
 
 ```yaml
-  - name: grafana-https
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: grafana
+  namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
     protocol: HTTPS
     port: 443
     hostname: grafana.codesugar.mx
     tls:
       mode: Terminate
       certificateRefs:
-      - kind: Secret
-        name: grafana-codesugar-mx-tls
-    allowedRoutes:
-      namespaces:
-        from: All
+      - name: grafana-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: grafana
+    sectionName: https
+  hostnames:
+  - grafana.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: grafana
+      port: 80
 ```
 
 That is the whole job. cert-manager creates `Certificate/grafana-codesugar-mx-tls` in
-`gateway-system`, orders the cert, writes the secret, and renews it from then on. The
-secret lives in the Gateway's own namespace, so no `ReferenceGrant` is involved.
+`monitoring`, orders the cert, writes the secret, and renews it from then on. The
+secret lives in the same namespace as the `ListenerSet` that references it, so no
+`ReferenceGrant` is involved. Adding a host touches only the app's own file, never
+`gateway.yaml`.
 
 Give each listener its own secret name. Sharing one secret across listeners merges the
 hostnames into a single SAN certificate, which means every new host re-issues the whole
 thing; separate names keep the blast radius at one host.
 
-The app's `HTTPRoute` needs a matching `hostnames` entry and **no** `sectionName` — with
-`sectionName` it pins to a single listener and TLS traffic 404s. See
-`infrastructure/flux/test/nginx.yaml`.
+The app's `HTTPRoute` attaches to its `ListenerSet` with `sectionName: https`, not to
+`main-gateway` directly. Any `.yaml` in `infrastructure/flux/apps/` works as a template.
+The new host is LAN-only until you add it to the public list in `lan-only-policy`.
 
 ## Verifying
 
@@ -151,11 +198,14 @@ kubectl -n cert-manager logs deploy/cert-manager | grep -i gateway
 # issuers registered with ACME
 kubectl get clusterissuer                                   # READY=True
 
-# the shim turned listeners into Certificates
-kubectl -n gateway-system get certificate,certificaterequest,order,challenge
+# the ListenerSet was accepted by main-gateway
+kubectl -n <app-ns> get listenerset <name> -o yaml          # Accepted + Programmed
+
+# the shim turned listeners into Certificates (in the app's namespace)
+kubectl -n <app-ns> get certificate,certificaterequest,order,challenge
 
 # watch the temporary solver route come and go
-kubectl -n gateway-system get httproute -w                  # cm-acme-http-solver-xxxxx
+kubectl -n <app-ns> get httproute -w                        # cm-acme-http-solver-xxxxx
 
 # from OUTSIDE the network, while a challenge is pending
 curl -sv http://test.codesugar.mx/.well-known/acme-challenge/anything
@@ -170,13 +220,13 @@ curl -vI https://test.codesugar.mx                          # "(STAGING) Let's E
 
 ## Switching staging → prod
 
-Change the annotation on the Gateway to `letsencrypt-prod` and commit. cert-manager
-notices the issuer changed but will not discard a still-valid certificate, so force a
-fresh order:
+Change the `cert-manager.io/cluster-issuer` annotation on the app's `ListenerSet` to
+`letsencrypt-prod` and commit. cert-manager notices the issuer changed but will not
+discard a still-valid certificate, so force a fresh order:
 
 ```bash
-kubectl -n gateway-system delete certificate test-codesugar-mx-tls
-kubectl -n gateway-system delete secret test-codesugar-mx-tls
+kubectl -n <app-ns> delete certificate test-codesugar-mx-tls
+kubectl -n <app-ns> delete secret test-codesugar-mx-tls
 ```
 
 The shim recreates the Certificate from the listener within seconds. Re-run the `curl
@@ -186,19 +236,21 @@ The shim recreates the Certificate from the listener within seconds. Re-run the 
 
 ```bash
 # why is a cert stuck?
-kubectl -n gateway-system describe certificate <name>
-kubectl -n gateway-system describe challenge        # the ACME error is here
+kubectl -n <app-ns> describe certificate <name>
+kubectl -n <app-ns> describe challenge              # the ACME error is here
 kubectl -n cert-manager logs deploy/cert-manager -f
 ```
 
 **Challenge pending forever** — Let's Encrypt cannot reach port 80. Check the A record
 resolves to the WAN IP and the router forwards 80 to `192.168.1.210`; test the solver URL
-from outside the LAN, not from a machine that resolves the name internally.
+from outside the LAN, not from a machine that resolves the name internally. If the solver
+route exists but is not attached to `main-gateway`, the `ListenerSet` is missing the
+`http01-parentreffallback` annotation.
 
 **Listener stuck on `ResolvedRefs: False`** — the secret does not exist yet. Expected
 until the first order completes; it resolves on its own.
 
-**Port 80 suddenly 404s after adding an HTTPS listener** — check
+**Port 80 suddenly 404s after adding a ListenerSet** — check
 `kubectl get ciliumenvoyconfig -A` still shows a CEC for the gateway. Cilium
 [#44123](https://github.com/cilium/cilium/issues/44123) had a wildcard-HTTP-listener
 plus specific-hostname-HTTPS-listener combination generate no Envoy config at all, which
@@ -207,11 +259,3 @@ breaks HTTP-01 exactly. Fixed before 1.20, but this is the topology that trigger
 **Secret exists but is `Opaque` and cert-manager refuses to write it** — Cilium
 [#45705](https://github.com/cilium/cilium/issues/45705), 1.19.3.x only, fixed before
 1.20. Not applicable here, noted so it isn't re-diagnosed from scratch.
-
-## Later: per-namespace listeners
-
-Cilium 1.20 and cert-manager 1.21 both support `XListenerSet`, and the CRD is already
-installed. Each app namespace could own an `XListenerSet` carrying its own HTTPS
-listener, cluster-issuer annotation and TLS secret attached to `main-gateway` — so
-adding a host touches only that app's directory and never `gateway.yaml`. Worth
-revisiting once there are several apps.

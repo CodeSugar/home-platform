@@ -30,6 +30,41 @@ spec:
     installCRDs: false
     web:
       serverOnly: true
+      # SSO through Authelia (client "flux-web" in auth/authelia.yaml). The UI
+      # impersonates the logged-in user with the ID token's email and groups
+      # claims, so what they can see/do is plain RBAC (see the binding below).
+      config:
+        baseURL: https://flux.codesugar.mx
+        authentication:
+          type: OAuth2
+          oauth2:
+            provider: OIDC
+            issuerURL: https://auth.codesugar.mx
+            clientID: flux-web
+  # Created out-of-band (not committed), with the plaintext half of the
+  # FLUX_WEB_OIDC_CLIENT_SECRET_DIGEST pair in authelia-secrets:
+  #   kubectl -n flux-system create secret generic flux-web-client --from-literal=client-secret=...
+  valuesFrom:
+  - kind: Secret
+    name: flux-web-client
+    valuesKey: client-secret
+    targetPath: web.config.authentication.oauth2.clientSecret
+---
+# LLDAP group -> full Flux web UI access (read everything, reconcile/suspend/
+# resume/download Flux objects, restart workloads, delete pods). flux-web-admin
+# is created by the chart (web.rbac.createRoles).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flux-web-ldap-k8s-admin
+subjects:
+- kind: Group
+  name: ldap-k8s-admin
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: flux-web-admin
+  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: ListenerSet

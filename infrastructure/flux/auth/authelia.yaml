@@ -46,6 +46,31 @@ data:
     notifier:
       filesystem:
         filename: /config/notification.txt
+    # OIDC provider. The {{ secret }} calls are expanded by the template filter
+    # (X_AUTHELIA_CONFIG_FILTERS) from files in authelia-secrets, so no key
+    # material is committed. hmac_secret comes from an env _FILE variable.
+    identity_providers:
+      oidc:
+        jwks:
+        - key: {{ secret "/secrets/OIDC_JWKS_KEY" | mindent 8 "|" | msquote }}
+        claims_policies:
+          # By default Authelia keeps everything but sub/iss/... out of the ID token
+          # (it's only served by userinfo). Flux web impersonates from the ID token's
+          # email and groups claims, so they have to be in it.
+          id-token-claims:
+            id_token: [email, email_verified, groups, name, preferred_username]
+        clients:
+        - client_id: flux-web
+          client_name: Flux Web UI
+          client_secret: '{{ secret "/secrets/FLUX_WEB_OIDC_CLIENT_SECRET_DIGEST" }}'
+          claims_policy: id-token-claims
+          authorization_policy: two_factor
+          redirect_uris:
+          - https://flux.codesugar.mx/oauth2/callback
+          # Flux web's default scopes; offline_access needs the refresh_token grant
+          scopes: [openid, offline_access, profile, email, groups]
+          grant_types: [authorization_code, refresh_token]
+          response_types: [code]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -86,6 +111,10 @@ spec:
           value: /secrets/STORAGE_ENCRYPTION_KEY
         - name: AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE
           value: /secrets/LDAP_PASSWORD
+        - name: AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE
+          value: /secrets/OIDC_HMAC_SECRET
+        - name: X_AUTHELIA_CONFIG_FILTERS
+          value: template
         readinessProbe:
           httpGet:
             path: /api/health
@@ -109,7 +138,10 @@ spec:
           name: authelia-config
       # Created out-of-band (not committed): kubectl -n auth create secret generic authelia-secrets \
       #   --from-literal=JWT_SECRET=... --from-literal=SESSION_SECRET=... \
-      #   --from-literal=STORAGE_ENCRYPTION_KEY=... --from-literal=LDAP_PASSWORD=...
+      #   --from-literal=STORAGE_ENCRYPTION_KEY=... --from-literal=LDAP_PASSWORD=... \
+      #   --from-literal=OIDC_HMAC_SECRET=... --from-file=OIDC_JWKS_KEY=private.pem \
+      #   --from-literal=FLUX_WEB_OIDC_CLIENT_SECRET_DIGEST='$pbkdf2-sha512$...'
+      # OIDC values: see "OIDC clients" in docs/guides/k8s-auth.md.
       - name: secrets
         secret:
           secretName: authelia-secrets

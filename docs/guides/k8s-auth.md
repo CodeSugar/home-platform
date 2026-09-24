@@ -248,6 +248,54 @@ all have a "trusted header" / reverse-proxy auth mode), it can log the user in
 automatically. Only enable that when the app is reachable **exclusively** through
 `internal-gateway`. Anything that can reach the pod directly can forge those headers.
 
+## OIDC clients
+
+Apps that speak OpenID Connect log in against Authelia directly instead of going through
+`internal-gateway`. The provider is configured under `identity_providers.oidc` in
+`authelia.yaml`. Its key material lives in `authelia-secrets` and gets into the config two ways:
+
+- `OIDC_HMAC_SECRET` through `AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE`.
+- `OIDC_JWKS_KEY` and each client's secret digest through `{{ secret "/secrets/..." }}`.
+  `X_AUTHELIA_CONFIG_FILTERS=template` enables this. The filter runs over the whole
+  config, so any literal `{{` in it would need escaping.
+
+The `id-token-claims` claims policy puts `email`, `groups`, and similar claims into the
+ID token. Authelia leaves them out by default and serves them only from userinfo. The
+`groups` claim holds LLDAP group names, such as `ldap-k8s-admin`.
+
+### Flux web UI (`flux.codesugar.mx`)
+
+- Client `flux-web`, with redirect `https://flux.codesugar.mx/oauth2/callback`.
+- The UI impersonates the user with the ID token's `email` and `groups` claims, so RBAC
+  decides what a user can see and do. `ClusterRoleBinding/flux-web-ldap-k8s-admin` in
+  `flux-web.yaml` gives the `ldap-k8s-admin` group the chart's `flux-web-admin` role. Bind
+  another group to `flux-web-user` for read-only access. A user in no bound group can log
+  in but sees nothing.
+- The plaintext client secret is in `flux-system/flux-web-client`. The HelmRelease injects
+  it with `valuesFrom`.
+
+One-time setup. Create the secrets **before** pushing. Authelia won't start while the
+`{{ secret }}` files are missing.
+
+```bash
+# HMAC secret, JWKS signing key, and the flux-web client secret (plaintext + digest)
+HMAC=$(openssl rand -hex 64)
+openssl genrsa -out private.pem 2048
+kubectl -n auth exec deploy/authelia -- authelia crypto hash generate pbkdf2 \
+  --variant sha512 --random --random.length 72 --random.charset rfc3986
+#   -> "Random Password: <plaintext>"  and  "Digest: $pbkdf2-sha512$..."
+
+kubectl -n auth patch secret authelia-secrets --type merge -p "$(jq -n \
+  --arg h "$HMAC" --rawfile k private.pem --arg d '<digest>' \
+  '{stringData: {OIDC_HMAC_SECRET: $h, OIDC_JWKS_KEY: $k, FLUX_WEB_OIDC_CLIENT_SECRET_DIGEST: $d}}')"
+kubectl -n flux-system create secret generic flux-web-client \
+  --from-literal=client-secret='<plaintext>'
+rm private.pem
+```
+
+Check `https://auth.codesugar.mx/.well-known/openid-configuration` to confirm the provider
+is up.
+
 ## Verifying
 
 ```bash
