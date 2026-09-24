@@ -4,7 +4,9 @@ metadata:
   name: home-platform
   namespace: flux-system
 spec:
-  interval: 5m0s
+  # Push-triggered via the webhook Receiver (receiver.yaml); polling is only a
+  # fallback for missed deliveries (GitHub does not retry them).
+  interval: 1h0m0s
   url: https://github.com/CodeSugar/home-platform.git
   ref:
     branch: main
@@ -15,7 +17,8 @@ metadata:
   name: home-platform
   namespace: flux-system
 spec:
-  interval: 5m0s
+  # Drift correction only: a new source revision triggers a reconcile immediately.
+  interval: 10m0s
   path: ./infrastructure/flux
   prune: true
   sourceRef:

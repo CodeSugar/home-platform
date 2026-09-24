@@ -11,7 +11,7 @@ GitOps definition of a single-node, bare-metal Kubernetes homelab (kubeadm). The
 - `infrastructure/flux/flux-system/home-platform.yaml` defines the `GitRepository` (github.com/CodeSugar/home-platform, branch `main`) and a single `Kustomization` with `path: ./infrastructure/flux` and `prune: true`.
 - There is **no `kustomization.yaml`**: Flux auto-generates one, so every `.yaml` anywhere under `infrastructure/flux/` is applied. Adding a file deploys it; deleting a file (or moving it out) prunes those resources.
 - `infrastructure/disabled/` is outside that path — move an app there to turn it off while keeping its manifest.
-- A GitHub webhook (`receiver.yaml`, host `webhook-flux.codesugar.mx`) triggers reconcile on push; otherwise it polls every 5m.
+- A GitHub webhook (`receiver.yaml`, host `webhook-flux.codesugar.mx`) triggers reconcile on push; polling (GitRepository every 1h) is only a fallback. The Kustomization re-applies every 10m for drift correction.
 - Each app is one multi-document YAML file (Namespace, Deployment, Service, ListenerSet, HTTPRoute, …) in `infrastructure/flux/apps/`.
 
 Validating locally (no cluster needed): `kubectl apply --dry-run=client -f <file>`. Checking reconcile on the cluster: `kubectl -n flux-system get gitrepositories,kustomizations` and `kubectl -n flux-system describe kustomization home-platform`. Note the code-server ServiceAccount is cluster read-only (no secrets, no writes).

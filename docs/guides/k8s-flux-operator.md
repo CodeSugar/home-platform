@@ -25,7 +25,7 @@ flowchart TD
 
 The **Flux Operator** installs and manages Flux itself. You describe the Flux you want in a `FluxInstance`; the operator pulls the matching manifests from `ghcr.io`, deploys the controllers, and upgrades them automatically when a new `2.x` release is published.
 
-From there it's regular Flux. **source-controller** clones `CodeSugar/home-platform` (branch `main`) every minute and stores the commit as an artifact. **kustomize-controller** takes that artifact, builds `./infrastructure/flux`, and applies it to the cluster. New commits are picked up as soon as the source sees them; the `5m` interval is how often Flux re-applies everything to undo manual drift. With `prune: true`, anything you delete from Git is deleted from the cluster.
+From there it's regular Flux. **source-controller** fetches `CodeSugar/home-platform` (branch `main`) when the GitHub webhook (`flux-system/receiver.yaml`) fires on push, polling every hour as a fallback, and stores the commit as an artifact. **kustomize-controller** takes that artifact, builds `./infrastructure/flux`, and applies it to the cluster. New commits are picked up as soon as the source sees them; the Kustomization's `10m` interval is how often Flux re-applies everything to undo manual drift. With `prune: true`, anything you delete from Git is deleted from the cluster.
 
 **helm-controller**, **notification-controller** and **source-watcher** stay idle until you add `HelmRelease`, `Alert`/`Provider` or `ArtifactGenerator` objects.
 
@@ -127,7 +127,7 @@ metadata:
   name: home-platform
   namespace: flux-system
 spec:
-  interval: 5m0s
+  interval: 10m0s
   path: ./infrastructure/flux
   prune: true
   sourceRef:
