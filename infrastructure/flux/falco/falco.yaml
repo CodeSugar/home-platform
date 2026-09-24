@@ -73,6 +73,56 @@ spec:
       name: ghcr.io
   priority: 50
 ---
+# Exceptions for known false positives. Loads after falco-rules (higher priority) so
+# the appends apply. Keep each one scoped as tightly as the alert's fields allow.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Rulesfile
+metadata:
+  name: local-rules
+  namespace: falco
+spec:
+  priority: 60
+  inlineRules:
+  - rule: Drop and execute new binary in container
+    exceptions:
+    # Every git-over-SSH operation (sshd -> gitea serv, and git hooks -> gitea hook).
+    # The rootful image's entrypoint chowns /app/gitea at startup, which copies the
+    # binary up into the overlay's upper layer, so it looks "dropped" (its ctime is
+    # the container start time).
+    - name: forgejo_chowned_binary
+      fields: [container.image.repository, proc.exepath]
+      values:
+      - [codeberg.org/forgejo/forgejo, /app/gitea/gitea]
+    # Interactive dev box: tools are installed at runtime (apt, pip, npm), so
+    # everything it runs is upper-layer. Trade-off: a binary dropped by an attacker
+    # in code-server doesn't alert either; other rules still apply to it.
+    - name: code_server_runtime_tools
+      fields: [k8s.ns.name, container.image.repository]
+      values:
+      - [code-server, docker.io/codercom/code-server]
+    override:
+      exceptions: append
+  # OpenSSH wires each session's stdin/stdout to the client socket; that's how SSH
+  # works, not a reverse shell. Was ~93% of all events.
+  - rule: Redirect STDOUT/STDIN to Network Connection in Container
+    exceptions:
+    - name: forgejo_sshd
+      fields: [container.image.repository, proc.name]
+      comps: [=, in]
+      values:
+      - [codeberg.org/forgejo/forgejo, [sshd, sshd-session]]
+    override:
+      exceptions: append
+  # code-server's ServiceAccount is cluster read-only on purpose, for kubectl.
+  - rule: Contact K8S API Server From Container
+    exceptions:
+    - name: code_server_kubectl
+      fields: [k8s.ns.name, container.image.repository, proc.name]
+      values:
+      - [code-server, docker.io/codercom/code-server, kubectl]
+    override:
+      exceptions: append
+---
 # stdout stays on so `kubectl logs` shows events even if sidekick is down
 apiVersion: artifact.falcosecurity.dev/v1alpha1
 kind: Config
@@ -268,6 +318,33 @@ spec:
     - path:
         type: PathPrefix
         value: /
+    backendRefs:
+    - name: falcosidekick-ui
+      port: 2802
+---
+# PWA manifest and its icons, outside the SecurityPolicy (which targets only the route
+# above). Browsers fetch <link rel="manifest"> without cookies, so through Authelia it
+# always got redirected to auth.codesugar.mx and failed CORS in the console. Static,
+# nothing sensitive.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: falcosidekick-ui-public
+  namespace: falco
+spec:
+  parentRefs:
+  - name: internal-gateway
+    namespace: envoy-gateway-system
+  hostnames:
+  - falco.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: Exact
+        value: /manifest.json
+    - path:
+        type: PathPrefix
+        value: /img/icons/
     backendRefs:
     - name: falcosidekick-ui
       port: 2802

@@ -108,6 +108,9 @@ Authelia with the same forward-auth setup as `whoami-private` (see
    Unlike `whoami-private`, it uses Authelia's cookie-only endpoint
    `/api/authz/ext-authz-cookie/`, which ignores the `Authorization` header (see
    Troubleshooting: the UI sends a dummy basic-auth header that Authelia would reject).
+   `HTTPRoute/falcosidekick-ui-public` sends only `/manifest.json` and
+   `/img/icons/` to the UI without the policy. Browsers fetch the PWA manifest
+   without cookies, so behind Authelia it would always be redirected and fail CORS.
 3. `ReferenceGrant`s: namespace `falco` is in `allow-routes-to-envoy-internal`
    (`envoy-gateway.yaml`), and `falco-securitypolicy-to-authelia` lives in `auth`.
 4. An Authelia `access_control` rule limits the host to the `ldap-k8s-admin` group
@@ -180,26 +183,31 @@ variables is in the [falcosidekick README](https://github.com/falcosecurity/falc
 
 Add a `Rulesfile` with `inlineRules` (structured YAML, not a string) or a
 `configMapRef`, with a higher `priority` than `falco-rules` (50) so it loads after,
-and can override or append to, the official rules. For example, to stop code-server's
-terminals from firing "Terminal shell in container":
+and can override or append to, the official rules. `Rulesfile/local-rules` in
+`falco.yaml` is where the current exceptions live; add to it rather than creating
+another. Scope each exception to the fields shown in the alert (image repository +
+`proc.exepath` is better than a whole namespace). The pattern:
 
 ```yaml
-apiVersion: artifact.falcosecurity.dev/v1alpha1
-kind: Rulesfile
-metadata:
-  name: local-rules
-  namespace: falco
-spec:
-  priority: 60
   inlineRules:
-  - rule: Terminal shell in container
+  - rule: Drop and execute new binary in container
     exceptions:
-    - name: code_server
-      fields: [k8s.ns.name]
-      values: [[code-server]]
+    - name: forgejo_chowned_binary
+      fields: [container.image.repository, proc.exepath]
+      values:
+      - [codeberg.org/forgejo/forgejo, /app/gitea/gitea]
     override:
       exceptions: append
 ```
+
+Current exceptions:
+
+| Rule | Exception | Why |
+|---|---|---|
+| Drop and execute new binary in container | Forgejo image running `/app/gitea/gitea` | The entrypoint chowns `/app/gitea` at startup, copying the binary into the overlay upper layer; fires on every git-over-SSH operation |
+| Drop and execute new binary in container | code-server image in namespace `code-server` | Dev box with tools installed at runtime; accepted blind spot |
+| Redirect STDOUT/STDIN to Network Connection in Container | Forgejo image, `sshd` / `sshd-session` | OpenSSH connects session stdio to the socket; was ~93% of events |
+| Contact K8S API Server From Container | `kubectl` in code-server | Its ServiceAccount is cluster read-only by design |
 
 ### Tuning Falco config
 
@@ -257,6 +265,13 @@ conditions.
 **Rules fail to load (`LOAD_ERR_...` in Falco's log)**: usually rules needing a plugin
 field that isn't loaded (`container.*` needs the container plugin) or a rules version
 newer than Falco supports.
+
+**`Falco internal: hot restart failure: Plugin requirement not satisfied, must load
+one of: container`** (Critical) right after the Falco pod starts: the artifact
+sidecar writes plugin configs one by one and sends SIGHUP; a restart that happens
+before the container plugin's fragment is written fails to load the rules. Harmless
+if a later restart logs `Loaded plugin 'container@...'` followed by `Opening 'syscall'
+source`; only a problem if it's the last thing in the log.
 
 **`k8smeta` fields empty / plugin can't connect**: check the metacollector pod is
 running and `metacollector.falco.svc:45000` resolves.
