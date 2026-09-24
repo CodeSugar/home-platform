@@ -284,10 +284,6 @@ spec:
     kind: HTTPRoute
     name: falcosidekick-ui
   extAuth:
-    # No authorization/proxy-authorization, unlike whoami-private: the UI's frontend
-    # probes its own API with "Basic anonymous:anonymous" to detect that its login is
-    # disabled. Forwarded, Authelia checks that against LLDAP, answers 401 + Basic and
-    # the browser pops a password dialog. Without it only the session cookie counts.
     headersToExtAuth:
     - accept
     - cookie
@@ -298,7 +294,11 @@ spec:
       - name: authelia
         namespace: auth
         port: 9091
-      path: /api/authz/ext-authz/
+      # Cookie-only endpoint (auth/authelia.yaml): the UI's frontend probes its own API
+      # with "Basic anonymous:anonymous" to detect that its login is disabled. Envoy
+      # always forwards Authorization to ext-authz (headersToExtAuth can't drop it), and
+      # on the default endpoint Authelia would reject it with a Basic challenge.
+      path: /api/authz/ext-authz-cookie/
       headersToBackend:
       - Remote-User
       - Remote-Groups

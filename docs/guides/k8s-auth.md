@@ -146,8 +146,15 @@ against LLDAP directly, with no session involved.
   to `ldap-k8s-admin` this way (see [k8s-falco.md](k8s-falco.md#access-to-the-ui)).
 - Authelia reads its config only at startup. After a change to the ConfigMap is
   reconciled, run `kubectl -n auth rollout restart deploy/authelia`.
-- The ext-authz endpoint (`/api/authz/ext-authz/`) is one of Authelia's default authz
-  endpoints, so it needs no config.
+- `server.endpoints.authz` declares two ext-authz endpoints. Declaring any replaces
+  Authelia's defaults, so the standard one is listed again:
+  - `/api/authz/ext-authz/`: session cookie or `Authorization: Basic`. Use this one
+    by default.
+  - `/api/authz/ext-authz-cookie/`: session cookie only. Use it for apps whose frontend
+    sends its own `Authorization` header (Falcosidekick UI). Envoy always forwards that
+    header to ext-authz, even when it's left out of `headersToExtAuth`. On the default
+    endpoint Authelia would check it against LLDAP, reply `401` with
+    `WWW-Authenticate: Basic`, and the browser would show a password dialog.
 - The pod sets `enableServiceLinks: false`. Otherwise Kubernetes injects
   `AUTHELIA_PORT=tcp://...` and similar variables for the `authelia` Service, and Authelia
   parses them as config keys (`server.port`), which conflicts with `server.address` and

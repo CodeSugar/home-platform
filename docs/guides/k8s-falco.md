@@ -105,9 +105,9 @@ Authelia with the same forward-auth setup as `whoami-private` (see
 1. `HTTPRoute/falcosidekick-ui-ls` on main-gateway sends the host to `envoy-internal`.
 2. `HTTPRoute/falcosidekick-ui` on internal-gateway sends it to the UI Service,
    with `SecurityPolicy/authelia-extauthz` checking every request against Authelia.
-   Unlike `whoami-private`, it only forwards the session cookie, not the
-   `Authorization` header (see Troubleshooting: the UI sends a dummy basic-auth
-   header that Authelia would reject).
+   Unlike `whoami-private`, it uses Authelia's cookie-only endpoint
+   `/api/authz/ext-authz-cookie/`, which ignores the `Authorization` header (see
+   Troubleshooting: the UI sends a dummy basic-auth header that Authelia would reject).
 3. `ReferenceGrant`s: namespace `falco` is in `allow-routes-to-envoy-internal`
    (`envoy-gateway.yaml`), and `falco-securitypolicy-to-authelia` lives in `auth`.
 4. An Authelia `access_control` rule limits the host to the `ldap-k8s-admin` group
@@ -271,11 +271,14 @@ running and `metacollector.falco.svc:45000` resolves.
 
 **Browser pops a native username/password dialog**: the UI's frontend calls its own
 API with `Authorization: Basic anonymous:anonymous` to detect that its login is
-disabled. If the `SecurityPolicy` forwards `authorization` to Authelia, Authelia tries
-those credentials against LLDAP (`username=anonymous` in its log) and answers `401` with
-`WWW-Authenticate: Basic`. `headersToExtAuth` must not include `authorization` or
-`proxy-authorization` for this route; the session cookie is enough. (This also means
-curl with `-u` basic auth doesn't work for this host.)
+disabled. Envoy always forwards `Authorization` to ext-authz (leaving it out of
+`headersToExtAuth` doesn't help), and Authelia's default `ext-authz` endpoint tries
+those credentials against LLDAP (`username=anonymous` in its log, ~2s `401
+ext_authz_denied` in Envoy's access log) and answers `WWW-Authenticate: Basic`. The
+`SecurityPolicy` must use `/api/authz/ext-authz-cookie/`, which only looks at the
+session cookie. If it already does, check Authelia was restarted after the endpoint
+was added to its config. (This also means curl with `-u` basic auth doesn't work for
+this host.)
 
 **`https://falco.codesugar.mx` returns `403` after logging in**: the user isn't in
 `ldap-k8s-admin`. `500` / `RefNotPermitted`: namespace `falco` missing from

@@ -7,6 +7,21 @@ data:
   configuration.yml: |
     server:
       address: tcp://:9091
+      # Configuring authz replaces Authelia's default endpoints, so ext-authz (used by
+      # most SecurityPolicies) is declared again with its default strategies.
+      endpoints:
+        authz:
+          ext-authz:
+            implementation: ExtAuthz
+          # Session cookie only, no Authorization header. For apps whose frontend sends
+          # its own Authorization header (Falcosidekick UI sends a dummy
+          # "Basic anonymous:anonymous"): Envoy always forwards that header to ext-authz,
+          # Authelia would check it against LLDAP, answer 401 + WWW-Authenticate: Basic
+          # and the browser would pop a password dialog.
+          ext-authz-cookie:
+            implementation: ExtAuthz
+            authn_strategies:
+            - name: CookieSession
     log:
       level: info
     theme: auto
