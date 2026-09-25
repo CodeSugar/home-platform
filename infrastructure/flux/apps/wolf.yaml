@@ -60,6 +60,9 @@ spec:
         volumeMounts:
         - name: docker-socket
           mountPath: /var/run/dind
+        # Wolf's API socket; the Wolf UI app container bind-mounts it from the Docker host
+        - name: wolf-api
+          mountPath: /var/run/wolf
         # Image/layer storage for the (large) game images; survives restarts
         - name: docker-data
           mountPath: /var/lib/docker
@@ -85,6 +88,9 @@ spec:
           value: /etc/wolf
         - name: XDG_RUNTIME_DIR
           value: /tmp/sockets
+        # Path the default Wolf UI app expects (mounts /var/run/wolf/wolf.sock)
+        - name: WOLF_SOCKET_PATH
+          value: /var/run/wolf/wolf.sock
         # AMD Radeon 890M iGPU (same /dev/dri used by jellyfin)
         - name: WOLF_RENDER_NODE
           value: /dev/dri/renderD128
@@ -110,6 +116,9 @@ spec:
         volumeMounts:
         - name: docker-socket
           mountPath: /var/run/dind
+        # Wolf's API socket; the Wolf UI app container bind-mounts it from the Docker host
+        - name: wolf-api
+          mountPath: /var/run/wolf
         - name: wolf-state
           mountPath: /etc/wolf
         - name: sockets
@@ -120,6 +129,8 @@ spec:
           mountPath: /run/udev
       volumes:
       - name: docker-socket
+        emptyDir: {}
+      - name: wolf-api
         emptyDir: {}
       - name: sockets
         emptyDir: {}
