@@ -110,6 +110,15 @@ spec:
       containers:
       - name: wolf
         image: ghcr.io/games-on-whales/wolf:stable
+        # Drop one harmless log line per video frame. The image's Mesa 25.0.7 tries the
+        # 890M's VPE block for RGB->NV12, but VPE < 2.0 can't output NV12; it fails with
+        # an unconditional stderr print, then falls back to shader conversion (frames are
+        # correct). Mesa >= 26.2 stops offering VPE for this; remove the wrapper once the
+        # image ships it. `exec` keeps the image entrypoint (then supervisord) as PID 1.
+        command:
+        - bash
+        - -c
+        - exec /entrypoint.sh 2> >(grep --line-buffered -v '^SIVPE ERROR .*si_vpe_construct_blt' >&2)
         securityContext:
           # Equivalent of --device /dev/dri, /dev/uinput, /dev/uhid and the
           # "c 13:* rmw" cgroup rule: virtual input devices are created at runtime

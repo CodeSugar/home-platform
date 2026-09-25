@@ -144,6 +144,15 @@ kubectl -n wolf exec deploy/wolf -c dind -- docker ps -a   # app containers Wolf
   `config.toml` mounts `/var/run/wolf/wolf.sock` into the UI container, so Wolf needs
   `WOLF_SOCKET_PATH=/var/run/wolf/wolf.sock` and both containers need `/var/run/wolf`.
   If the path is missing in `dind`, Docker creates an empty directory there instead.
+- **`SIVPE ERROR … si_vpe_construct_blt … (9)` once per frame:** harmless, and filtered
+  out of Wolf's stderr by the container `command` wrapper. Error 9 is
+  `VPE_STATUS_PIXEL_FORMAT_NOT_SUPPORTED`: the 890M's VPE (1.x) can only output RGB, but
+  the image's Mesa 25.0.7 still offers it for the RGB→NV12 conversion before encoding.
+  Mesa then falls back to shader conversion, and the frames are correct. Mesa ≥ 26.2 no
+  longer offers VPE for this, so drop the wrapper once the Wolf image ships that. To check
+  it's still cosmetic:
+  `gst-launch-1.0 videotestsrc num-buffers=1 pattern=white ! video/x-raw,format=BGRx ! vapostproc ! video/x-raw,format=NV12 ! filesink location=/tmp/o.nv12`
+  then `od -An -tu1 -N4 /tmp/o.nv12` should print `235`s (the error is printed but the output is right).
 - **No GPU encoding:** confirm `/dev/dri/renderD128` is the 890M on the host
   (`ls -l /dev/dri/by-path/`) and adjust `WOLF_RENDER_NODE` if not.
 - **Falco alerts:** both containers are privileged and mount host `/dev`, which Falco's
