@@ -103,6 +103,10 @@ spec:
           mountPath: /dev
         - name: udev
           mountPath: /run/udev
+        # App containers run with IpcMode: host, so every session (Steam's Chromium
+        # especially) shares this /dev/shm; the pod default is only 64Mi
+        - name: dshm
+          mountPath: /dev/shm
       containers:
       - name: wolf
         image: ghcr.io/games-on-whales/wolf:stable
@@ -157,6 +161,10 @@ spec:
           mountPath: /dev
         - name: udev
           mountPath: /run/udev
+        # App containers run with IpcMode: host, so every session (Steam's Chromium
+        # especially) shares this /dev/shm; the pod default is only 64Mi
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: docker-socket
         emptyDir: {}
@@ -181,6 +189,10 @@ spec:
       - name: udev
         hostPath:
           path: /run/udev
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 4Gi
 ---
 # Moonlight speaks its own TCP+UDP protocol, which main-gateway can't route, so
 # Wolf gets a dedicated LAN IP via Cilium LB IPAM + L2 announcements.

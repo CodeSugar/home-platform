@@ -43,6 +43,7 @@ paths must mean the same thing inside both containers. Both mount these at the s
 | `/var/run/wolf-sockets` | `emptyDir` | Wayland / PulseAudio sockets (`XDG_RUNTIME_DIR`). Not under `/tmp`: the `docker:dind` entrypoint mounts a tmpfs over `/tmp`, hiding anything mounted below it from dockerd |
 | `/var/run/wolf` | `emptyDir` | Wolf API socket (`WOLF_SOCKET_PATH`), bind-mounted into the Wolf UI app |
 | `/dev` | host `/dev` | GPU, and the virtual input devices Wolf creates at runtime |
+| `/dev/shm` | `emptyDir` (Memory, 4Gi) | Shared memory. App containers use `IpcMode: host`, so all sessions share the sidecar's `/dev/shm`; the pod default of 64Mi fills up and Steam's UI crashes |
 | `/run/udev` | host `/run/udev` | udev database for the virtual input devices |
 
 The sidecar also keeps its image/layer storage at `/zpool-ssd/k8s/wolf/docker`, because
@@ -134,6 +135,11 @@ kubectl -n wolf exec deploy/wolf -c dind -- docker ps -a   # app containers Wolf
   `kubectl -n wolf exec deploy/wolf -c dind -- ls -la /var/run/wolf-sockets/`. `wayland-*`
   and `pulse-socket` must be sockets (`srwx…`). Empty directories mean dockerd didn't see
   Wolf's files and created placeholder directories for the bind mounts instead.
+- **Steam opens but nothing shows (no window):** `steamwebhelper` (Steam's Chromium UI)
+  is restarting every ~10s. Check `/dev/shm` usage in dind (`df -h /dev/shm`); `cef_log.txt`
+  says "Less than 64MB of free space in temporary directory for shared memory files".
+  Logs are in `/home/retro/.steam/steam/logs/` inside the Steam container:
+  `kubectl -n wolf exec deploy/wolf -c dind -- docker exec <WolfSteam_…> ls /home/retro/.steam/steam/logs`.
 - **Wolf UI starts and exits within a second:** it can't reach Wolf's API. The default
   `config.toml` mounts `/var/run/wolf/wolf.sock` into the UI container, so Wolf needs
   `WOLF_SOCKET_PATH=/var/run/wolf/wolf.sock` and both containers need `/var/run/wolf`.
