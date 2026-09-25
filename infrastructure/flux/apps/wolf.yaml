@@ -9,6 +9,8 @@
 #
 # Host prerequisites (manual, once):
 #   mkdir -p /zpool-ssd/k8s/wolf/etc /zpool-ssd/k8s/wolf/docker
+#   mkdir -p /zpool-hdd/k8s/wolf/steam /zpool-hdd/k8s/wolf/roms
+#   chown 1000:1000 /zpool-hdd/k8s/wolf/steam /zpool-hdd/k8s/wolf/roms
 #   curl -fsSL https://raw.githubusercontent.com/games-on-whales/wolf/stable/85-wolf.rules \
 #     -o /etc/udev/rules.d/85-wolf.rules
 #   udevadm control --reload-rules && udevadm trigger
@@ -107,6 +109,12 @@ spec:
         # especially) shares this /dev/shm; the pod default is only 64Mi
         - name: dshm
           mountPath: /dev/shm
+        # HDD game data, bind-mounted into app containers by config.toml `mounts`
+        # (Steam library -> steamapps, Pegasus -> /ROMs/<platform>); only dind needs them
+        - name: steam-library
+          mountPath: /zpool-hdd/k8s/wolf/steam
+        - name: roms
+          mountPath: /zpool-hdd/k8s/wolf/roms
       containers:
       - name: wolf
         image: ghcr.io/games-on-whales/wolf:stable
@@ -198,6 +206,14 @@ spec:
       - name: udev
         hostPath:
           path: /run/udev
+      - name: steam-library
+        hostPath:
+          path: /zpool-hdd/k8s/wolf/steam
+          type: Directory
+      - name: roms
+        hostPath:
+          path: /zpool-hdd/k8s/wolf/roms
+          type: Directory
       - name: dshm
         emptyDir:
           medium: Memory
