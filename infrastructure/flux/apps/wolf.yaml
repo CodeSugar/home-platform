@@ -1,0 +1,177 @@
+# Games on Whales / Wolf: Moonlight-compatible streaming server that launches
+# each game/desktop as its own Docker container with the GPU attached.
+# https://games-on-whales.github.io/wolf/stable/user/quickstart.html
+#
+# Wolf drives a Docker daemon to spawn apps, but the node runs containerd, so a
+# Docker-in-Docker sidecar provides one. Wolf passes *host paths* to Docker for
+# bind mounts (config, sockets, fake-udev, /dev), so both containers mount those
+# at identical paths.
+#
+# Host prerequisites (manual, once):
+#   mkdir -p /zpool-ssd/k8s/wolf/etc /zpool-ssd/k8s/wolf/docker
+#   curl -fsSL https://raw.githubusercontent.com/games-on-whales/wolf/stable/85-wolf.rules \
+#     -o /etc/udev/rules.d/85-wolf.rules
+#   udevadm control --reload-rules && udevadm trigger
+#
+# Pairing: add 192.168.1.211 manually in Moonlight (no mDNS discovery through a
+# LoadBalancer), then open the PIN URL printed in `kubectl -n wolf logs deploy/wolf -c wolf`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wolf
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wolf
+  namespace: wolf
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: wolf
+  template:
+    metadata:
+      labels:
+        app: wolf
+    spec:
+      # Not hostNetwork: dockerd creates its own bridge and iptables rules, which
+      # must stay inside the pod netns instead of clobbering Cilium's on the host.
+      initContainers:
+      # Native sidecar: starts (and becomes ready) before wolf, lives as long as the pod
+      - name: dind
+        image: docker:29-dind
+        restartPolicy: Always
+        securityContext:
+          privileged: true
+        args:
+        - --host=unix:///var/run/dind/docker.sock
+        env:
+        # Only a unix socket is exposed, no TCP listener that would need TLS
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        startupProbe:
+          exec:
+            command: ["docker", "-H", "unix:///var/run/dind/docker.sock", "info"]
+          periodSeconds: 2
+          failureThreshold: 60
+        volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/dind
+        # Image/layer storage for the (large) game images; survives restarts
+        - name: docker-data
+          mountPath: /var/lib/docker
+        - name: wolf-state
+          mountPath: /etc/wolf
+        - name: sockets
+          mountPath: /tmp/sockets
+        - name: dev
+          mountPath: /dev
+        - name: udev
+          mountPath: /run/udev
+      containers:
+      - name: wolf
+        image: ghcr.io/games-on-whales/wolf:stable
+        securityContext:
+          # Equivalent of --device /dev/dri, /dev/uinput, /dev/uhid and the
+          # "c 13:* rmw" cgroup rule: virtual input devices are created at runtime
+          privileged: true
+        env:
+        - name: WOLF_DOCKER_SOCKET
+          value: /var/run/dind/docker.sock
+        - name: HOST_APPS_STATE_FOLDER
+          value: /etc/wolf
+        - name: XDG_RUNTIME_DIR
+          value: /tmp/sockets
+        # AMD Radeon 890M iGPU (same /dev/dri used by jellyfin)
+        - name: WOLF_RENDER_NODE
+          value: /dev/dri/renderD128
+        ports:
+        - containerPort: 47984
+          name: https
+          protocol: TCP
+        - containerPort: 47989
+          name: http
+          protocol: TCP
+        - containerPort: 48010
+          name: rtsp
+          protocol: TCP
+        - containerPort: 47999
+          name: control
+          protocol: UDP
+        - containerPort: 48100
+          name: video
+          protocol: UDP
+        - containerPort: 48200
+          name: audio
+          protocol: UDP
+        volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/dind
+        - name: wolf-state
+          mountPath: /etc/wolf
+        - name: sockets
+          mountPath: /tmp/sockets
+        - name: dev
+          mountPath: /dev
+        - name: udev
+          mountPath: /run/udev
+      volumes:
+      - name: docker-socket
+        emptyDir: {}
+      - name: sockets
+        emptyDir: {}
+      - name: docker-data
+        hostPath:
+          path: /zpool-ssd/k8s/wolf/docker
+          type: Directory
+      # config.toml, pairing keys/certs and per-app home dirs (Steam libraries, saves)
+      - name: wolf-state
+        hostPath:
+          path: /zpool-ssd/k8s/wolf/etc
+          type: Directory
+      # Whole host /dev (as in the quickstart) so uinput/uhid devices Wolf creates
+      # show up in both containers and can be handed to app containers
+      - name: dev
+        hostPath:
+          path: /dev
+      - name: udev
+        hostPath:
+          path: /run/udev
+---
+# Moonlight speaks its own TCP+UDP protocol, which main-gateway can't route, so
+# Wolf gets a dedicated LAN IP via Cilium LB IPAM + L2 announcements.
+apiVersion: v1
+kind: Service
+metadata:
+  name: wolf
+  namespace: wolf
+  annotations:
+    lbipam.cilium.io/ips: "192.168.1.211"
+spec:
+  type: LoadBalancer
+  # Keep the client's real IP: Wolf keys streaming sessions on it
+  externalTrafficPolicy: Local
+  selector:
+    app: wolf
+  ports:
+  - name: https
+    port: 47984
+    protocol: TCP
+  - name: http
+    port: 47989
+    protocol: TCP
+  - name: rtsp
+    port: 48010
+    protocol: TCP
+  - name: control
+    port: 47999
+    protocol: UDP
+  - name: video
+    port: 48100
+    protocol: UDP
+  - name: audio
+    port: 48200
+    protocol: UDP
