@@ -14,7 +14,7 @@ GitOps definition of a single-node, bare-metal Kubernetes homelab (kubeadm). The
 - A GitHub webhook (`receiver.yaml`, host `webhook-flux.codesugar.mx`) triggers reconcile on push; polling (GitRepository every 1h) is only a fallback. The Kustomization re-applies every 10m for drift correction.
 - Each app is one multi-document YAML file (Namespace, Deployment, Service, ListenerSet, HTTPRoute, …) in `infrastructure/flux/apps/`.
 
-Validating locally (no cluster needed): `kubectl apply --dry-run=client -f <file>`. Checking reconcile on the cluster: `kubectl -n flux-system get gitrepositories,kustomizations` and `kubectl -n flux-system describe kustomization home-platform`. Note the code-server ServiceAccount is cluster read-only (no secrets, no writes).
+Validating locally (no cluster needed): `kubectl apply --dry-run=client -f <file>`. Checking reconcile on the cluster: `kubectl -n flux-system get gitrepositories,kustomizations` and `kubectl -n flux-system describe kustomization home-platform`. Note the code-server ServiceAccount is cluster read-only (no secrets, no writes), except `pods/exec` in the `wolf` namespace (Role in `apps/wolf.yaml`) for debugging.
 
 ## Traffic path and the per-app exposure pattern
 

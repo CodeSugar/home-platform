@@ -20,6 +20,33 @@ kind: Namespace
 metadata:
   name: wolf
 ---
+# Lets code-server (cluster read-only elsewhere) exec into Wolf's containers for
+# debugging: dind for `docker ps/logs/exec` into app containers. Note both
+# containers are privileged with host /dev, so this is effectively root on the node.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: code-server-exec
+  namespace: wolf
+rules:
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: code-server-exec
+  namespace: wolf
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: code-server-exec
+subjects:
+- kind: ServiceAccount
+  name: code-server
+  namespace: code-server
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
