@@ -68,8 +68,10 @@ spec:
           mountPath: /var/lib/docker
         - name: wolf-state
           mountPath: /etc/wolf
+        # Not under /tmp: the dind entrypoint mounts a fresh tmpfs over /tmp,
+        # which would hide this volume from dockerd
         - name: sockets
-          mountPath: /tmp/sockets
+          mountPath: /var/run/wolf-sockets
         - name: dev
           mountPath: /dev
         - name: udev
@@ -86,8 +88,9 @@ spec:
           value: /var/run/dind/docker.sock
         - name: HOST_APPS_STATE_FOLDER
           value: /etc/wolf
+        # Wayland/PulseAudio sockets, bind-mounted into app containers by dind
         - name: XDG_RUNTIME_DIR
-          value: /tmp/sockets
+          value: /var/run/wolf-sockets
         # Path the default Wolf UI app expects (mounts /var/run/wolf/wolf.sock)
         - name: WOLF_SOCKET_PATH
           value: /var/run/wolf/wolf.sock
@@ -122,7 +125,7 @@ spec:
         - name: wolf-state
           mountPath: /etc/wolf
         - name: sockets
-          mountPath: /tmp/sockets
+          mountPath: /var/run/wolf-sockets
         - name: dev
           mountPath: /dev
         - name: udev

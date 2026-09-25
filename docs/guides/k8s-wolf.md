@@ -40,7 +40,7 @@ paths must mean the same thing inside both containers. Both mount these at the s
 | Path | Source | Contents |
 |---|---|---|
 | `/etc/wolf` | `/zpool-ssd/k8s/wolf/etc` | `cfg/config.toml`, pairing keys/certs, per-app home dirs, `fake-udev` |
-| `/tmp/sockets` | `emptyDir` | Wayland / PulseAudio sockets (`XDG_RUNTIME_DIR`) |
+| `/var/run/wolf-sockets` | `emptyDir` | Wayland / PulseAudio sockets (`XDG_RUNTIME_DIR`). Not under `/tmp`: the `docker:dind` entrypoint mounts a tmpfs over `/tmp`, hiding anything mounted below it from dockerd |
 | `/var/run/wolf` | `emptyDir` | Wolf API socket (`WOLF_SOCKET_PATH`), bind-mounted into the Wolf UI app |
 | `/dev` | host `/dev` | GPU, and the virtual input devices Wolf creates at runtime |
 | `/run/udev` | host `/run/udev` | udev database for the virtual input devices |
@@ -130,6 +130,10 @@ kubectl -n wolf exec deploy/wolf -c dind -- docker ps -a   # app containers Wolf
   mount the `docker-socket` volume at `/var/run/dind`.
 - **App container fails on a bind mount:** a path Wolf passed doesn't exist in `dind`;
   both containers must mount it at the same path (table above).
+- **App can't connect to Wayland / no audio:** check the sockets from dind's side with
+  `kubectl -n wolf exec deploy/wolf -c dind -- ls -la /var/run/wolf-sockets/`. `wayland-*`
+  and `pulse-socket` must be sockets (`srwx…`). Empty directories mean dockerd didn't see
+  Wolf's files and created placeholder directories for the bind mounts instead.
 - **Wolf UI starts and exits within a second:** it can't reach Wolf's API. The default
   `config.toml` mounts `/var/run/wolf/wolf.sock` into the UI container, so Wolf needs
   `WOLF_SOCKET_PATH=/var/run/wolf/wolf.sock` and both containers need `/var/run/wolf`.
