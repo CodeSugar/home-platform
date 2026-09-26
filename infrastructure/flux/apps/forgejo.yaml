@@ -145,3 +145,42 @@ spec:
   - backendRefs:
     - name: forgejo
       port: 22
+---
+# The SSH TCPRoute is handled by Cilium's eBPF LB, not Envoy, so it bypasses the
+# gateway's reserved:ingress policy (lan-only-policy.yaml) and the internet was
+# reaching sshd directly (source IP is preserved). Filter at the pod instead.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: forgejo-lan-only
+  namespace: forgejo
+spec:
+  endpointSelector:
+    matchLabels:
+      app: forgejo
+  ingress:
+  # HTTP arrives via the gateway's Envoy; host visibility is enforced there
+  - fromEntities:
+    - ingress
+    toPorts:
+    - ports:
+      - port: "3000"
+        protocol: TCP
+  # Kubelet probes, and anything else in-cluster (e.g. git from code-server)
+  - fromEntities:
+    - host
+    - cluster
+    toPorts:
+    - ports:
+      - port: "3000"
+        protocol: TCP
+      - port: "22"
+        protocol: TCP
+  # SSH: same trusted sources as the gateway policy
+  - fromCIDR:
+    - 192.168.0.0/16
+    - 201.119.42.162/32
+    toPorts:
+    - ports:
+      - port: "22"
+        protocol: TCP
