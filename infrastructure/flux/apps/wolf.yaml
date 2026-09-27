@@ -55,7 +55,7 @@ metadata:
   name: wolf
   namespace: wolf
 spec:
-  replicas: 1
+  replicas: 0
   strategy:
     type: Recreate
   selector:
