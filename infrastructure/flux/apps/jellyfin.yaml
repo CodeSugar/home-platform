@@ -10,6 +10,10 @@ metadata:
   labels:
     app: jellyfin
   namespace: jellyfin
+  annotations:
+    # Bare Pod: spec changes (volumes, image) are immutable, so let Flux
+    # delete and recreate it instead of failing the reconcile.
+    kustomize.toolkit.fluxcd.io/force: enabled
 spec:
   securityContext:
     runAsUser: 1000
@@ -28,6 +32,11 @@ spec:
       mountPath: /cache
     - name: jellyfin-media
       mountPath: /media
+    # Retro games library for the Moonfin plugin: one folder per system
+    # (NES, SNES, GBA, PSX, ...), see
+    # https://github.com/Moonfin-Client/Plugin/wiki/Retro-Games
+    - name: jellyfin-roms
+      mountPath: /roms
     - name: jellyfin-hardware
       mountPath: /dev/dri
     securityContext:
@@ -47,6 +56,10 @@ spec:
   - name: jellyfin-media
     hostPath:
       path: /mnt/main/k8s/media/
+      type: DirectoryOrCreate
+  - name: jellyfin-roms
+    hostPath:
+      path: /mnt/main/k8s/roms/
       type: DirectoryOrCreate
   - name: jellyfin-hardware
     hostPath:
