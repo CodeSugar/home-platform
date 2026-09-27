@@ -1,0 +1,109 @@
+# Headlamp (Kubernetes web UI), LAN-only at https://headlamp.codesugar.mx.
+#
+# Login is Headlamp's default token auth: paste a ServiceAccount bearer token and
+# the UI acts with that token's RBAC. For a read-only session:
+#   kubectl -n headlamp create token headlamp-viewer --duration=24h
+# The chart's own ServiceAccount gets no RBAC (clusterRoleBinding.create: false);
+# by default the chart would bind it to cluster-admin.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: headlamp
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: headlamp
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  url: https://kubernetes-sigs.github.io/headlamp/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: headlamp
+  namespace: headlamp
+spec:
+  interval: 30m0s
+  releaseName: headlamp
+  targetNamespace: headlamp
+  storageNamespace: headlamp
+  chart:
+    spec:
+      chart: headlamp
+      version: "0.45.0"
+      sourceRef:
+        kind: HelmRepository
+        name: headlamp
+        namespace: flux-system
+      interval: 1h0m0s
+  values:
+    fullnameOverride: headlamp
+    clusterRoleBinding:
+      create: false
+---
+# Login identity for read-only sessions. cluster-read-only is defined in
+# apps/code-server.yaml (everything except secrets, get/list/watch only).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: headlamp-viewer
+  namespace: headlamp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: headlamp-viewer-cluster-read-only
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-read-only
+subjects:
+- kind: ServiceAccount
+  name: headlamp-viewer
+  namespace: headlamp
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: headlamp
+  namespace: headlamp
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: headlamp.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: headlamp-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: headlamp
+  namespace: headlamp
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: headlamp
+    sectionName: https
+  hostnames:
+  - headlamp.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: headlamp
+      port: 80
