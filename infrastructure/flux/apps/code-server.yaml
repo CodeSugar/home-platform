@@ -118,12 +118,63 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      # Not hostNetwork: dockerd creates its own bridge and iptables rules, which
+      # must stay inside the pod netns instead of clobbering Cilium's on the host.
+      # Ports published with `docker run -p` are reachable on localhost from
+      # code-server (shared pod netns), e.g. via code-server's /proxy/<port>/.
+      initContainers:
+      # The code-server image ships no docker CLI; copy it (plus the buildx/compose
+      # plugins) from the matching CLI image into a volume code-server mounts
+      - name: docker-cli
+        image: docker:29-cli
+        command:
+        - sh
+        - -c
+        - cp /usr/local/bin/docker /docker-cli/ && cp -r /usr/local/libexec/docker/cli-plugins /docker-cli/
+        volumeMounts:
+        - name: docker-cli
+          mountPath: /docker-cli
+      # Native sidecar: starts (and becomes ready) before code-server, lives as long as the pod.
+      # Privileged, so anyone with a code-server terminal is effectively root on the node.
+      - name: dind
+        image: docker:29-dind
+        restartPolicy: Always
+        securityContext:
+          privileged: true
+          # Override the pod-level uid 1000: dockerd must run as root
+          runAsUser: 0
+          runAsGroup: 0
+        args:
+        - --host=unix:///var/run/dind/docker.sock
+        # Socket group = coder's gid, so code-server (uid/gid 1000) can use it
+        - --group=1000
+        env:
+        # Only a unix socket is exposed, no TCP listener that would need TLS
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        startupProbe:
+          exec:
+            command: ["docker", "-H", "unix:///var/run/dind/docker.sock", "info"]
+          periodSeconds: 2
+          failureThreshold: 60
+        volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/dind
+        # Image/layer/build cache; survives restarts
+        - name: docker-data
+          mountPath: /var/lib/docker
+        # Same path as in code-server: `docker run -v` sources are resolved by
+        # dockerd in this container, so bind-mounted project dirs must exist here too
+        - name: project
+          mountPath: /home/coder/project
       containers:
       - name: code-server
         image: codercom/code-server:latest
         env:
         - name: DOCKER_USER
           value: coder
+        - name: DOCKER_HOST
+          value: unix:///var/run/dind/docker.sock
         ports:
         - containerPort: 8080
           name: http
@@ -136,7 +187,24 @@ spec:
           mountPath: /home/coder/project
         - name: ssh
           mountPath: /home/coder/.ssh
+        - name: docker-socket
+          mountPath: /var/run/dind
+        - name: docker-cli
+          mountPath: /usr/local/bin/docker
+          subPath: docker
+        # Default CLI plugin dir, so buildx/compose work without extra config
+        - name: docker-cli
+          mountPath: /usr/local/libexec/docker/cli-plugins
+          subPath: cli-plugins
       volumes:
+      - name: docker-socket
+        emptyDir: {}
+      - name: docker-cli
+        emptyDir: {}
+      - name: docker-data
+        hostPath:
+          path: /zpool-ssd/k8s/code-server/docker
+          type: Directory
       - name: local
         hostPath:
           path: /zpool-ssd/k8s/code-server/local
