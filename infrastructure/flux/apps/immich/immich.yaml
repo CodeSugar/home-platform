@@ -1,0 +1,387 @@
+# Immich (https://docs.immich.app), LAN-only, login through Authelia OIDC (LLDAP + 2FA).
+# Not behind the ext-authz SecurityPolicy like FileBrowser: the mobile app talks to the
+# API with its own bearer token and can't follow an Authelia redirect, so Authelia is
+# enforced by OIDC instead (client "immich" in auth/authelia.yaml, two_factor policy,
+# password login disabled). Admin = LDAP group ldap-k8s-admin (immich_role claim).
+#
+# Photos and videos land in the user's FileBrowser personal folder:
+#   /zpool-hdd/filebrowserquantum/users/<username>/media-reserved/<year>/<date>/<file>
+# Immich puts each user's library under library/<storage label>; the users folder is
+# mounted as library and the storage label comes from the OIDC preferred_username
+# (= LDAP uid = FileBrowser username), set once at first login.
+#
+# Host dirs (manual):
+#   mkdir -p /zpool-hdd/k8s/immich/data /zpool-ssd/k8s/immich/thumbs \
+#     /zpool-ssd/k8s/immich/postgres /zpool-ssd/k8s/immich/model-cache
+#
+# Secrets created out-of-band (not committed):
+#   kubectl -n immich create secret generic immich-secrets \
+#     --from-literal=DB_PASSWORD="$(openssl rand -hex 24)" \
+#     --from-literal=OIDC_CLIENT_SECRET='<plaintext from authelia crypto hash generate>'
+# The matching digest goes to authelia-secrets as IMMICH_OIDC_CLIENT_SECRET_DIGEST,
+# see "OIDC clients" in docs/guides/k8s-auth.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: immich
+---
+# Rendered into /config/immich.json by the init container, which fills in the OIDC
+# client secret (Immich's config file has no env substitution). Settings in this file
+# are locked in the admin UI.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: immich-config
+  namespace: immich
+data:
+  immich.json.tmpl: |
+    {
+      "server": {
+        "externalDomain": "https://photos.private.codesugar.mx"
+      },
+      "passwordLogin": {
+        "enabled": false
+      },
+      "oauth": {
+        "enabled": true,
+        "issuerUrl": "https://auth.codesugar.mx",
+        "clientId": "immich",
+        "clientSecret": "__OIDC_CLIENT_SECRET__",
+        "tokenEndpointAuthMethod": "client_secret_basic",
+        "scope": "openid email profile immich",
+        "buttonText": "Login with Authelia",
+        "autoRegister": true,
+        "autoLaunch": true,
+        "storageLabelClaim": "preferred_username",
+        "roleClaim": "immich_role"
+      },
+      "storageTemplate": {
+        "enabled": true,
+        "hashVerificationEnabled": true,
+        "template": "media-reserved/{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-server
+  namespace: immich
+spec:
+  replicas: 1
+  # hostPath storage: never run two pods against the same library
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: immich-server
+  template:
+    metadata:
+      labels:
+        app: immich-server
+    spec:
+      initContainers:
+      - name: render-config
+        image: busybox:1.37
+        command:
+        - sh
+        - -c
+        - sed "s|__OIDC_CLIENT_SECRET__|${OIDC_CLIENT_SECRET}|" /template/immich.json.tmpl > /config/immich.json
+        env:
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: immich-secrets
+              key: OIDC_CLIENT_SECRET
+        volumeMounts:
+        - name: config-template
+          mountPath: /template
+          readOnly: true
+        - name: config
+          mountPath: /config
+      containers:
+      - name: immich-server
+        image: ghcr.io/immich-app/immich-server:v3.3.1
+        ports:
+        - name: http
+          containerPort: 2283
+        env:
+        - name: TZ
+          value: America/Mexico_City
+        - name: IMMICH_CONFIG_FILE
+          value: /config/immich.json
+        - name: DB_HOSTNAME
+          value: immich-postgres
+        - name: DB_USERNAME
+          value: postgres
+        - name: DB_DATABASE_NAME
+          value: immich
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: immich-secrets
+              key: DB_PASSWORD
+        - name: REDIS_HOSTNAME
+          value: immich-redis
+        - name: IMMICH_MACHINE_LEARNING_URL
+          value: http://immich-machine-learning:3003
+        readinessProbe:
+          httpGet:
+            path: /api/server/ping
+            port: http
+        livenessProbe:
+          httpGet:
+            path: /api/server/ping
+            port: http
+          # First start runs DB migrations
+          initialDelaySeconds: 60
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        # FileBrowser personal folders: library/<username> = users/<username>
+        - name: library
+          mountPath: /data/library
+        # Thumbnails are read on every page load, keep them on the SSD
+        - name: thumbs
+          mountPath: /data/thumbs
+      volumes:
+      - name: config-template
+        configMap:
+          name: immich-config
+      - name: config
+        emptyDir: {}
+      - name: data
+        hostPath:
+          path: /zpool-hdd/k8s/immich/data
+          type: Directory
+      - name: library
+        hostPath:
+          path: /zpool-hdd/filebrowserquantum/users
+          type: Directory
+      - name: thumbs
+        hostPath:
+          path: /zpool-ssd/k8s/immich/thumbs
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-server
+  namespace: immich
+spec:
+  selector:
+    app: immich-server
+  ports:
+  - name: http
+    port: 80
+    targetPort: 2283
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-machine-learning
+  namespace: immich
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: immich-machine-learning
+  template:
+    metadata:
+      labels:
+        app: immich-machine-learning
+    spec:
+      containers:
+      - name: immich-machine-learning
+        image: ghcr.io/immich-app/immich-machine-learning:v3.3.1
+        ports:
+        - name: http
+          containerPort: 3003
+        env:
+        - name: TZ
+          value: America/Mexico_City
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: http
+        volumeMounts:
+        - name: model-cache
+          mountPath: /cache
+      volumes:
+      - name: model-cache
+        hostPath:
+          path: /zpool-ssd/k8s/immich/model-cache
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-machine-learning
+  namespace: immich
+spec:
+  selector:
+    app: immich-machine-learning
+  ports:
+  - name: http
+    port: 3003
+    targetPort: 3003
+---
+# Cache and job queue only, nothing worth persisting
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-redis
+  namespace: immich
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-redis
+  template:
+    metadata:
+      labels:
+        app: immich-redis
+    spec:
+      containers:
+      - name: valkey
+        image: docker.io/valkey/valkey:9@sha256:c123e3715db63d06d4ad6964884037aa0d5d4d703939b9929954112889708e1d
+        ports:
+        - name: redis
+          containerPort: 6379
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-redis
+  namespace: immich
+spec:
+  selector:
+    app: immich-redis
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: 6379
+---
+# Immich's own Postgres build (vectorchord for search), same digest as the release's
+# docker-compose.yml. Bump it together with the Immich version.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-postgres
+  namespace: immich
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: immich-postgres
+  template:
+    metadata:
+      labels:
+        app: immich-postgres
+    spec:
+      containers:
+      - name: postgres
+        image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+        ports:
+        - name: postgres
+          containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_DB
+          value: immich
+        - name: POSTGRES_INITDB_ARGS
+          value: --data-checksums
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: immich-secrets
+              key: DB_PASSWORD
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres", "-d", "immich"]
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        # compose's shm_size: 128mb
+        - name: shm
+          mountPath: /dev/shm
+      volumes:
+      - name: data
+        hostPath:
+          path: /zpool-ssd/k8s/immich/postgres
+          type: Directory
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-postgres
+  namespace: immich
+spec:
+  selector:
+    app: immich-postgres
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: immich
+  namespace: immich
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: photos.private.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: photos-private-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: immich
+  namespace: immich
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: immich
+    sectionName: https
+  hostnames:
+  - photos.private.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    # Large video uploads and the websocket would be cut by a request timeout
+    timeouts:
+      request: "0s"
+    backendRefs:
+    - name: immich-server
+      port: 80

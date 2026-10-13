@@ -64,6 +64,12 @@ data:
       # pools to ldap-k8s-admin (apps/filebrowserquantum). Pinned to 2FA explicitly.
       - domain: files.private.codesugar.mx
         policy: two_factor
+    # Immich's role claim: admin for ldap-k8s-admin, user for everyone else. Immich
+    # re-reads it on every login, so leaving the group also revokes admin.
+    definitions:
+      user_attributes:
+        immich_role:
+          expression: '"ldap-k8s-admin" in groups ? "admin" : "user"'
     session:
       cookies:
       - domain: codesugar.mx
@@ -88,6 +94,14 @@ data:
           # email and groups claims, so they have to be in it.
           id-token-claims:
             id_token: [email, email_verified, groups, name, preferred_username]
+          immich:
+            custom_claims:
+              immich_role:
+                attribute: immich_role
+        # Returned from userinfo, which Immich reads after the token exchange
+        scopes:
+          immich:
+            claims: [immich_role]
         clients:
         - client_id: flux-web
           client_name: Flux Web UI
@@ -100,6 +114,23 @@ data:
           scopes: [openid, offline_access, profile, email, groups]
           grant_types: [authorization_code, refresh_token]
           response_types: [code]
+        # https://www.authelia.com/integration/openid-connect/clients/immich/
+        - client_id: immich
+          client_name: Immich
+          client_secret: '{{ secret "/secrets/IMMICH_OIDC_CLIENT_SECRET_DIGEST" }}'
+          claims_policy: immich
+          authorization_policy: two_factor
+          require_pkce: true
+          pkce_challenge_method: S256
+          redirect_uris:
+          - https://photos.private.codesugar.mx/auth/login
+          - https://photos.private.codesugar.mx/user-settings
+          # Mobile app
+          - app.immich:///oauth-callback
+          scopes: [openid, profile, email, immich]
+          grant_types: [authorization_code]
+          response_types: [code]
+          token_endpoint_auth_method: client_secret_basic
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -169,7 +200,8 @@ spec:
       #   --from-literal=JWT_SECRET=... --from-literal=SESSION_SECRET=... \
       #   --from-literal=STORAGE_ENCRYPTION_KEY=... --from-literal=LDAP_PASSWORD=... \
       #   --from-literal=OIDC_HMAC_SECRET=... --from-file=OIDC_JWKS_KEY=private.pem \
-      #   --from-literal=FLUX_WEB_OIDC_CLIENT_SECRET_DIGEST='$pbkdf2-sha512$...'
+      #   --from-literal=FLUX_WEB_OIDC_CLIENT_SECRET_DIGEST='$pbkdf2-sha512$...' \
+      #   --from-literal=IMMICH_OIDC_CLIENT_SECRET_DIGEST='$pbkdf2-sha512$...'
       # OIDC values: see "OIDC clients" in docs/guides/k8s-auth.md.
       - name: secrets
         secret:

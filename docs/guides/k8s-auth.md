@@ -328,6 +328,31 @@ rm private.pem
 Check `https://auth.codesugar.mx/.well-known/openid-configuration` to confirm the provider
 is up.
 
+### Immich (`photos.private.codesugar.mx`)
+
+- Client `immich`, with redirects `/auth/login`, `/user-settings` and the mobile app's
+  `app.immich:///oauth-callback`.
+- There's no ext-authz in front of it, because the mobile app uses its own bearer token.
+  Immich has password login disabled, so Authelia (two_factor) is the only way in.
+- The `immich` claims policy and scope add an `immich_role` claim, computed from
+  `definitions.user_attributes`: `admin` for `ldap-k8s-admin`, `user` for everyone else.
+  Immich reads it from userinfo on every login.
+- `preferred_username` becomes the Immich storage label. That puts each user's library in
+  their FileBrowser personal folder, under `media-reserved/`.
+- Immich's config file can't read env vars. An init container renders
+  `/config/immich.json` from the ConfigMap template and the plaintext secret in
+  `immich/immich-secrets`.
+
+```bash
+kubectl -n auth exec deploy/authelia -- authelia crypto hash generate pbkdf2 \
+  --variant sha512 --random --random.length 72 --random.charset rfc3986
+kubectl -n auth patch secret authelia-secrets --type merge \
+  -p '{"stringData":{"IMMICH_OIDC_CLIENT_SECRET_DIGEST":"<digest>"}}'
+kubectl -n immich create secret generic immich-secrets \
+  --from-literal=DB_PASSWORD="$(openssl rand -hex 24)" \
+  --from-literal=OIDC_CLIENT_SECRET='<plaintext>'
+```
+
 ## Verifying
 
 ```bash
