@@ -17,9 +17,11 @@ metadata:
   namespace: filebrowserquantum
 data:
   config.yaml: |
-    server:
+    # v2.1 moved the listen settings from server to http
+    http:
       # Unprivileged port, the image default 80 needs NET_BIND_SERVICE as non-root
       port: 8080
+    server:
       cacheDir: /home/filebrowser/data/tmp
       database:
         path: /home/filebrowser/data/database.sqlite
