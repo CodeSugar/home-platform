@@ -60,6 +60,10 @@ data:
         policy: two_factor
       - domain: falco.codesugar.mx
         policy: deny
+      # FileBrowser Quantum: any user may log in, FileBrowser itself limits the
+      # pools to ldap-k8s-admin (apps/filebrowserquantum). Pinned to 2FA explicitly.
+      - domain: files.private.codesugar.mx
+        policy: two_factor
     session:
       cookies:
       - domain: codesugar.mx

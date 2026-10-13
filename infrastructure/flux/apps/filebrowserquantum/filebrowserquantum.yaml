@@ -1,0 +1,292 @@
+# FileBrowser Quantum (https://filebrowserquantum.com), LAN-only behind Authelia 2FA.
+# Login is proxy auth only: Authelia's Remote-User / Remote-Groups headers (LLDAP).
+# - Every user gets a personal folder on the HDD pool (source "Personal").
+# - ldap-k8s-admin members are FileBrowser admins and get both pools whole. Pool
+#   sources are denyByDefault; the "allow /" rule for group ldap-k8s-admin can only be
+#   created in the UI (Settings > Group Management) and lives in the app database.
+# Host dirs (manual): mkdir -p /zpool-ssd/k8s/filebrowserquantum/data /zpool-hdd/filebrowserquantum/users
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: filebrowserquantum
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebrowserquantum-config
+  namespace: filebrowserquantum
+data:
+  config.yaml: |
+    server:
+      # Unprivileged port, the image default 80 needs NET_BIND_SERVICE as non-root
+      port: 8080
+      cacheDir: /home/filebrowser/data/tmp
+      database:
+        path: /home/filebrowser/data/database.sqlite
+      sources:
+      # createUserDir: each user is scoped to /zpool-hdd/filebrowserquantum/users/<username>
+      - path: /srv/personal
+        name: Personal
+        config:
+          defaultEnabled: true
+          createUserDir: true
+          defaultUserScope: /
+      # Visible to everyone, but nothing inside is reachable without an allow rule
+      # (granted to group ldap-k8s-admin in the UI)
+      - path: /srv/zpool-ssd
+        name: zpool-ssd
+        config:
+          defaultEnabled: true
+          denyByDefault: true
+      - path: /srv/zpool-hdd
+        name: zpool-hdd
+        config:
+          defaultEnabled: true
+          denyByDefault: true
+    auth:
+      methods:
+        # Only Authelia logs users in, no local accounts
+        password:
+          enabled: false
+        # Groups via proxy need v2.1+. Remote-Groups is comma-separated, FileBrowser
+        # splits it and syncs the groups on every login; adminGroup also revokes admin
+        # when a user leaves the group.
+        proxy:
+          enabled: true
+          header: Remote-User
+          groupsClaim: Remote-Groups
+          adminGroup: ldap-k8s-admin
+          logoutRedirectUrl: https://auth.codesugar.mx/logout
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filebrowserquantum
+  namespace: filebrowserquantum
+spec:
+  replicas: 1
+  # hostPath storage: never run two pods against the same database
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: filebrowserquantum
+  template:
+    metadata:
+      labels:
+        app: filebrowserquantum
+    spec:
+      # Root so admins can manage files on the pools owned by any UID (the image
+      # default, 1000, could only write to its own files)
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      containers:
+      - name: filebrowserquantum
+        image: ghcr.io/gtsteffaniak/filebrowser:2.1.1-beta
+        ports:
+        - name: http
+          containerPort: 8080
+        env:
+        - name: TZ
+          value: America/Mexico_City
+        - name: FILEBROWSER_CONFIG
+          value: /config/config.yaml
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: data
+          mountPath: /home/filebrowser/data
+        - name: personal
+          mountPath: /srv/personal
+        - name: zpool-ssd
+          mountPath: /srv/zpool-ssd
+        - name: zpool-hdd
+          mountPath: /srv/zpool-hdd
+      volumes:
+      - name: config
+        configMap:
+          name: filebrowserquantum-config
+      - name: data
+        hostPath:
+          path: /zpool-ssd/k8s/filebrowserquantum/data
+          type: Directory
+      - name: personal
+        hostPath:
+          path: /zpool-hdd/filebrowserquantum/users
+          type: Directory
+      - name: zpool-ssd
+        hostPath:
+          path: /zpool-ssd
+          type: Directory
+      - name: zpool-hdd
+        hostPath:
+          path: /zpool-hdd
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: filebrowserquantum
+  namespace: filebrowserquantum
+spec:
+  selector:
+    app: filebrowserquantum
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: filebrowserquantum
+  namespace: filebrowserquantum
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: files.private.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: files-private-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: filebrowserquantum-ls
+  namespace: filebrowserquantum
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: filebrowserquantum
+    sectionName: https
+  hostnames:
+  - files.private.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    # FileBrowser grants admin from Remote-Groups. Drop client-supplied copies so only
+    # Authelia's values reach it (e.g. if it ever answers with an empty group list).
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        remove:
+        - Remote-User
+        - Remote-Groups
+        - Remote-Name
+        - Remote-Email
+    # Hand off to Envoy Gateway, which enforces Authelia (see SecurityPolicy below)
+    backendRefs:
+    - name: envoy-internal
+      namespace: envoy-gateway-system
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: filebrowserquantum
+  namespace: filebrowserquantum
+spec:
+  parentRefs:
+  - name: internal-gateway
+    namespace: envoy-gateway-system
+  hostnames:
+  - files.private.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: filebrowserquantum
+      port: 80
+---
+# https://www.authelia.com/integration/kubernetes/envoy/gateway/
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: authelia-extauthz
+  namespace: filebrowserquantum
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: filebrowserquantum
+  extAuth:
+    headersToExtAuth:
+    - accept
+    - cookie
+    - x-forwarded-proto
+    failOpen: false
+    http:
+      backendRefs:
+      - name: authelia
+        namespace: auth
+        port: 9091
+      # Cookie-only endpoint (auth/authelia.yaml): the frontend sends its own
+      # Authorization header on API calls, which the default endpoint would check
+      # against LLDAP and answer with a Basic challenge.
+      path: /api/authz/ext-authz-cookie/
+      headersToBackend:
+      - Remote-User
+      - Remote-Groups
+      - Remote-Name
+      - Remote-Email
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: filebrowserquantum-securitypolicy-to-authelia
+  namespace: auth
+spec:
+  from:
+  - group: gateway.envoyproxy.io
+    kind: SecurityPolicy
+    namespace: filebrowserquantum
+  to:
+  - group: ""
+    kind: Service
+    name: authelia
+---
+# FileBrowser trusts Remote-User / Remote-Groups as-is, so any pod that could reach it
+# directly could log in as an admin by forging them. Only internal-gateway's Envoy
+# (already past Authelia, which sets those headers) may connect.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-filebrowserquantum-ingress
+  namespace: filebrowserquantum
+spec:
+  endpointSelector:
+    matchLabels:
+      app: filebrowserquantum
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: envoy-gateway-system
+        gateway.envoyproxy.io/owning-gateway-name: internal-gateway
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP

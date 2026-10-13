@@ -126,6 +126,9 @@ spec:
   - group: gateway.networking.k8s.io
     kind: HTTPRoute
     namespace: falco
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: filebrowserquantum
   to:
   - group: ""
     kind: Service

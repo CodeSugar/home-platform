@@ -267,6 +267,19 @@ all have a "trusted header" / reverse-proxy auth mode), it can log the user in
 automatically. Only enable that when the app is reachable **exclusively** through
 `internal-gateway`. Anything that can reach the pod directly can forge those headers.
 
+`infrastructure/flux/apps/filebrowserquantum/` (`files.private.codesugar.mx`) is the
+reference for this. Three pieces work together:
+
+- A `CiliumNetworkPolicy` lets only internal-gateway's Envoy reach the pod.
+- The main-gateway route strips client-sent `Remote-*` headers.
+- FileBrowser's proxy auth reads `Remote-User` for the username and `Remote-Groups`
+  for groups, with `adminGroup: ldap-k8s-admin`.
+
+Every LLDAP user gets a personal folder on the HDD pool. The two pool sources are
+`denyByDefault`, and only the `ldap-k8s-admin` group has an allow rule. FileBrowser can
+only define that rule in its UI (Settings → Group Management), so it's stored in the
+app's database, not in git.
+
 ## OIDC clients
 
 Apps that speak OpenID Connect log in against Authelia directly instead of going through
