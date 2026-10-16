@@ -10,7 +10,7 @@ spec:
   # Trusted sources: all hosts DEFAULT
   - fromCIDR:
     - 192.168.0.0/16
-    - 201.119.42.162/32
+    - 201.119.27.53/32
     toPorts:
     - ports:
       - port: "80"
