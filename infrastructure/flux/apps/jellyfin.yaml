@@ -9,7 +9,7 @@ metadata:
   name: jellyfin
   namespace: jellyfin
 spec:
-  replicas: 0
+  replicas: 1
   # hostPath storage: never run two pods against the same config dir
   strategy:
     type: Recreate
