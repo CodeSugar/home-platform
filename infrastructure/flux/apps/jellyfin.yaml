@@ -53,19 +53,19 @@ spec:
       volumes:
       - name: jellyfin-config
         hostPath:
-          path: /mnt/main/k8s/jellyfin/config
+          path: /zpool-ssd/k8s/jellyfin/config
           type: DirectoryOrCreate
       - name: jellyfin-cache
         hostPath:
-          path: /mnt/main/k8s/jellyfin/cache
+          path: /zpool-ssd/k8s/jellyfin/cache
           type: Directory
       - name: jellyfin-media
         hostPath:
-          path: /mnt/main/k8s/media/
+          path: /zpool-hdd/media/
           type: Directory
       - name: jellyfin-roms
         hostPath:
-          path: /mnt/main/k8s/roms/
+          path: /zpool-hdd/roms/
           type: Directory
       - name: jellyfin-hardware
         hostPath:
