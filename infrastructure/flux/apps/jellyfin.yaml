@@ -9,7 +9,7 @@ metadata:
   name: jellyfin
   namespace: jellyfin
 spec:
-  replicas: 1
+  replicas: 0
   # hostPath storage: never run two pods against the same config dir
   strategy:
     type: Recreate
@@ -58,15 +58,15 @@ spec:
       - name: jellyfin-cache
         hostPath:
           path: /mnt/main/k8s/jellyfin/cache
-          type: DirectoryOrCreate
+          type: Directory
       - name: jellyfin-media
         hostPath:
           path: /mnt/main/k8s/media/
-          type: DirectoryOrCreate
+          type: Directory
       - name: jellyfin-roms
         hostPath:
           path: /mnt/main/k8s/roms/
-          type: DirectoryOrCreate
+          type: Directory
       - name: jellyfin-hardware
         hostPath:
           path: /dev/dri
