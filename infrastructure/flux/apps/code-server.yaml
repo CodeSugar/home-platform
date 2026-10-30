@@ -114,6 +114,23 @@ spec:
         app: code-server
     spec:
       serviceAccountName: code-server
+      # Resolve through Technitium (its LB IP, which is pinned; the ClusterIP isn't)
+      # instead of CoreDNS, so the pod and the dind containers get the LAN's local
+      # zones and blocking. Applies to every container in the pod, dind included.
+      # Cluster names (*.svc.cluster.local) only resolve if Technitium has a
+      # conditional forwarder for cluster.local -> 10.96.0.10 (kube-dns).
+      # kubectl is unaffected: in-cluster config uses KUBERNETES_SERVICE_HOST (an IP).
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+        - 192.168.1.212
+        searches:
+        - code-server.svc.cluster.local
+        - svc.cluster.local
+        - cluster.local
+        options:
+        - name: ndots
+          value: "5"
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
