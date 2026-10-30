@@ -1,0 +1,160 @@
+# Technitium DNS Server: recursive/caching resolver with ad blocking and local
+# zones for the LAN. https://technitium.com/dns/
+#
+# Host prerequisites (manual, once):
+#   mkdir -p /zpool-ssd/k8s/technitium/config
+#
+# Admin password (only read on first start, when /etc/dns is still empty; change
+# it in the web console afterwards):
+#   kubectl create namespace technitium
+#   kubectl -n technitium create secret generic technitium-admin \
+#     --from-literal=password='<password>'
+#
+# Clients: point the router's DHCP DNS option at 192.168.1.212. Never port-forward
+# 53 to it from the internet, it would become an open resolver.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: technitium
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: technitium
+  namespace: technitium
+spec:
+  replicas: 1
+  # hostPath storage: never run two pods against the same config dir
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: technitium
+  template:
+    metadata:
+      labels:
+        app: technitium
+    spec:
+      containers:
+      - name: technitium
+        image: technitium/dns-server:15.6.2@sha256:eb48ac5c135f4ab936b536f74f853d53e15ab39ef37fdbc9598a089b90d9f245
+        env:
+        - name: DNS_SERVER_DOMAIN
+          value: dns.codesugar.mx
+        - name: DNS_SERVER_ADMIN_PASSWORD_FILE
+          value: /run/secrets/technitium/password
+        # Clients keep their real IP (externalTrafficPolicy: Local below), so this
+        # limits recursion to the LAN even if 53 ever leaks to the internet
+        - name: DNS_SERVER_RECURSION
+          value: AllowOnlyForPrivateNetworks
+        ports:
+        - containerPort: 53
+          name: dns-udp
+          protocol: UDP
+        - containerPort: 53
+          name: dns-tcp
+          protocol: TCP
+        - containerPort: 5380
+          name: http
+          protocol: TCP
+        readinessProbe:
+          tcpSocket:
+            port: 53
+          periodSeconds: 10
+        volumeMounts:
+        - name: config
+          mountPath: /etc/dns
+        - name: admin-password
+          mountPath: /run/secrets/technitium
+          readOnly: true
+      volumes:
+      # Zones, settings, block lists, query logs
+      - name: config
+        hostPath:
+          path: /zpool-ssd/k8s/technitium/config
+          type: Directory
+      - name: admin-password
+        secret:
+          secretName: technitium-admin
+---
+# DNS is plain UDP/TCP 53, which main-gateway can't route, so it gets a dedicated
+# LAN IP via Cilium LB IPAM + L2 announcements (same as Wolf).
+apiVersion: v1
+kind: Service
+metadata:
+  name: technitium-dns
+  namespace: technitium
+  annotations:
+    lbipam.cilium.io/ips: "192.168.1.212"
+spec:
+  type: LoadBalancer
+  # Keep the client's real IP: needed for per-client query logs, recursion ACLs
+  # and blocking rules
+  externalTrafficPolicy: Local
+  selector:
+    app: technitium
+  ports:
+  - name: dns-udp
+    port: 53
+    protocol: UDP
+  - name: dns-tcp
+    port: 53
+    protocol: TCP
+---
+# Web console only through the gateway (HTTPS), not on the LB IP
+apiVersion: v1
+kind: Service
+metadata:
+  name: technitium-web
+  namespace: technitium
+spec:
+  selector:
+    app: technitium
+  ports:
+  - name: http
+    port: 80
+    targetPort: 5380
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: technitium
+  namespace: technitium
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    name: main-gateway
+    namespace: gateway-system
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: dns.codesugar.mx
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: dns-codesugar-mx-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: technitium
+  namespace: technitium
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: technitium
+    sectionName: https
+  hostnames:
+  - dns.codesugar.mx
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: technitium-web
+      port: 80
