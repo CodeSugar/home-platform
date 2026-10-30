@@ -31,7 +31,7 @@ spec:
           type: Directory
       containers:
       - name: agentgateway
-        image: cr.agentgateway.dev/agentgateway:v1.5.0
+        image: cr.agentgateway.dev/agentgateway:v1.6.0@sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c
         env:
         - name: LOCAL_XDS_PATH
           value: /config/config.yaml

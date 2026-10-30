@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: webtop
-        image: lscr.io/linuxserver/webtop:ubuntu-kde
+        image: lscr.io/linuxserver/webtop:ubuntu-kde-c201b048-ls186@sha256:fcab0de8f9d2b10582c4d0b47095e281b66e136b2f78a44638798b18a8d2c5ef
         securityContext:
           privileged: true
           seccompProfile:

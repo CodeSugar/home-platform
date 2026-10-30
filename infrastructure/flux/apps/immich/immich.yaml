@@ -82,7 +82,7 @@ spec:
     spec:
       initContainers:
       - name: render-config
-        image: busybox:1.37
+        image: busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
         command:
         - sh
         - -c
@@ -101,7 +101,7 @@ spec:
           mountPath: /config
       containers:
       - name: immich-server
-        image: ghcr.io/immich-app/immich-server:v3.3.1
+        image: ghcr.io/immich-app/immich-server:v3.3.5@sha256:485d546a2e31d6a8b4db8423fcba5c109de8c218d93410af115fd1ccfc4352a6
         ports:
         - name: http
           containerPort: 2283
@@ -198,7 +198,7 @@ spec:
     spec:
       containers:
       - name: immich-machine-learning
-        image: ghcr.io/immich-app/immich-machine-learning:v3.3.1
+        image: ghcr.io/immich-app/immich-machine-learning:v3.3.5@sha256:5b28c9352c8374b8a1ed96fbdd8d6755fea6e43510ec43fdf6538aa02ea40f56
         ports:
         - name: http
           containerPort: 3003

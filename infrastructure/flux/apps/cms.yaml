@@ -26,7 +26,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: cms
-        image: codercom/code-server:latest
+        image: codercom/code-server:4.143.1@sha256:377b66bec5645510ed52549bb00e648c273edc604d230a3f90fd2b2433afcb97
         env:
         - name: DOCKER_USER
           value: coder

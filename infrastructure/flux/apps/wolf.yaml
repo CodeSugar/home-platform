@@ -71,7 +71,7 @@ spec:
       initContainers:
       # Native sidecar: starts (and becomes ready) before wolf, lives as long as the pod
       - name: dind
-        image: docker:29-dind
+        image: docker:29.9.2-dind@sha256:9e79b879b177fbd72c34376a3dd3d91747da5db49e1f560f76aea59561471977
         restartPolicy: Always
         securityContext:
           privileged: true
@@ -117,7 +117,7 @@ spec:
           mountPath: /zpool-hdd/k8s/wolf/roms
       containers:
       - name: wolf
-        image: ghcr.io/games-on-whales/wolf:stable
+        image: ghcr.io/games-on-whales/wolf:stable@sha256:b0ef253739f9bd49b71eba7e150c955fd05990c0d409e666d89236995351551a
         # Drop one harmless log line per video frame. The image's Mesa 25.0.7 tries the
         # 890M's VPE block for RGB->NV12, but VPE < 2.0 can't output NV12; it fails with
         # an unconditional stderr print, then falls back to shader conversion (frames are

@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: zed
-        image: ghcr.io/zee295/zed-web:latest
+        image: ghcr.io/zee295/zed-web:latest@sha256:4f9c715c6c9bf99dc011922a79ed780c943269ac1a16caee21be4d1eafea1a23
         ports:
         - containerPort: 8090
           name: http

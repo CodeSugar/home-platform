@@ -126,7 +126,7 @@ spec:
       # The code-server image ships no docker CLI; copy it (plus the buildx/compose
       # plugins) from the matching CLI image into a volume code-server mounts
       - name: docker-cli
-        image: docker:29-cli
+        image: docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb
         command:
         - sh
         - -c
@@ -137,7 +137,7 @@ spec:
       # Native sidecar: starts (and becomes ready) before code-server, lives as long as the pod.
       # Privileged, so anyone with a code-server terminal is effectively root on the node.
       - name: dind
-        image: docker:29-dind
+        image: docker:29.9.2-dind@sha256:9e79b879b177fbd72c34376a3dd3d91747da5db49e1f560f76aea59561471977
         restartPolicy: Always
         securityContext:
           privileged: true
@@ -169,7 +169,7 @@ spec:
           mountPath: /home/coder/project
       containers:
       - name: code-server
-        image: codercom/code-server:latest
+        image: codercom/code-server:4.143.1@sha256:377b66bec5645510ed52549bb00e648c273edc604d230a3f90fd2b2433afcb97
         env:
         - name: DOCKER_USER
           value: coder
