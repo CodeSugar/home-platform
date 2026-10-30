@@ -32,18 +32,18 @@ spec:
         - method: GET
           path: "/\\.well-known/acme-challenge/.+"
   # Everyone else: PUBLIC HOSTS only
-  #- fromEntities:
-  #  - world
-  #  toPorts:
-  # - ports:
-  #    - port: "80"
-  #      protocol: TCP
-  #    - port: "443"
-  #      protocol: TCP
-  #    rules:
-  #      http:
+  - fromEntities:
+    - world
+    toPorts:
+   - ports:
+      - port: "80"
+        protocol: TCP
+      - port: "443"
+        protocol: TCP
+      rules:
+        http:
   #      - host: "whoami\\.codesugar\\.mx"
-  #      - host: "webhook-flux\\.codesugar\\.mx"
+        - host: "webhook-flux\\.codesugar\\.mx"
   #      - host: "jellyfin\\.codesugar\\.mx"
   #      - host: "openwebui\\.codesugar\\.mx"
   #      - host: "auth\\.codesugar\\.mx"
